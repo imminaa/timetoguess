@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyResult, initialProgress, jumpTo, type Progress } from "@/lib/progression";
+import {
+  applyResult,
+  initialProgress,
+  jumpTo,
+  spendWin,
+  type Progress,
+} from "@/lib/progression";
 
 describe("progression ladder", () => {
   it("starts at easy", () => {
@@ -49,5 +55,15 @@ describe("progression ladder", () => {
 
   it("manual jump resets counters", () => {
     expect(jumpTo("expert")).toEqual({ tier: "expert", wins: 0, losses: 0 });
+  });
+
+  it("spending a win (hint cost) takes one pip", () => {
+    const oneWin: Progress = { tier: "medium", wins: 1, losses: 0 };
+    expect(spendWin(oneWin)).toEqual({ tier: "medium", wins: 0, losses: 0 });
+  });
+
+  it("spending a win floors at zero and never demotes the tier", () => {
+    const noWins: Progress = { tier: "medium", wins: 0, losses: 1 };
+    expect(spendWin(noWins)).toEqual({ tier: "medium", wins: 0, losses: 1 });
   });
 });

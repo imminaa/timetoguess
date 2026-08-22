@@ -11,7 +11,7 @@ import StageBar from "@/components/StageBar";
 import TierLadder from "@/components/TierLadder";
 import { STAGES, difficultyMeta, type Difficulty } from "@/lib/game-config";
 import { hintLabel, type HintType } from "@/lib/hints";
-import { applyResult, jumpTo, type Progress } from "@/lib/progression";
+import { applyResult, jumpTo, spendWin, type Progress } from "@/lib/progression";
 import {
   defaultSettings,
   loadProgress,
@@ -227,11 +227,8 @@ export default function Game({ ready }: { ready: boolean }) {
   const takeHint = useCallback(async () => {
     if (phase.kind !== "playing" || busy) return;
     const { round } = phase;
-    // Re-check under the latest state: a hint must always leave a stage to
-    // burn (never converts to a loss like Skip) and a rung to reveal.
-    const isLast = clampIndex(phase.stageIndex) === stages.length - 1;
     const hintIndex = revealedHints.length;
-    if (isLast || hintIndex >= round.hintTypes.length) return;
+    if (hintIndex >= round.hintTypes.length) return;
     setBusy(true);
     try {
       const res = await fetch("/api/hint", {
@@ -245,14 +242,18 @@ export default function Game({ ready }: { ready: boolean }) {
         ...h,
         { key: Date.now(), type: hint.type, text: "text" in hint ? hint.text : undefined },
       ]);
-      advanceStage();
+      setProgress((prev) => {
+        const next = spendWin(prev ?? loadProgress());
+        saveProgress(next);
+        return next;
+      });
     } catch {
-      // A failed hint burns nothing.
+      // A failed hint costs nothing.
       setError("Could not fetch a hint. Try again.");
     } finally {
       setBusy(false);
     }
-  }, [phase, busy, stages, clampIndex, revealedHints.length, advanceStage]);
+  }, [phase, busy, revealedHints.length]);
 
   const skipStage = useCallback(() => {
     if (phase.kind !== "playing") return;
@@ -454,20 +455,16 @@ export default function Game({ ready }: { ready: boolean }) {
               <button
                 type="button"
                 onClick={() => void takeHint()}
-                disabled={busy || nextStage == null || nextHintType == null}
+                disabled={busy || nextHintType == null}
                 title={
-                  nextStage == null
-                    ? "No hints on the last stage"
-                    : nextHintType == null
-                      ? "No hints left"
-                      : undefined
+                  nextHintType == null
+                    ? "No hints left"
+                    : "Costs a win from your tier progress"
                 }
                 className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Lightbulb size={15} aria-hidden />
-                {nextStage == null ? (
-                  "Hint"
-                ) : nextHintType == null ? (
+                {nextHintType == null ? (
                   "No hints left"
                 ) : (
                   <>Hint · {hintLabel(nextHintType)}</>

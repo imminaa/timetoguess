@@ -61,6 +61,14 @@ export function applyResult(progress: Progress, won: boolean): ProgressUpdate {
   };
 }
 
+/**
+ * The cost of a hint: one win pip, floored at zero. Never demotes a tier —
+ * hints can slow the climb but never push you back down.
+ */
+export function spendWin(progress: Progress): Progress {
+  return { ...progress, wins: Math.max(0, progress.wins - 1) };
+}
+
 /** Manual jump to a tier from the ladder. */
 export function jumpTo(tier: Difficulty): Progress {
   return { tier, wins: 0, losses: 0 };
