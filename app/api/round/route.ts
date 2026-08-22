@@ -1,6 +1,7 @@
 import { encryptAnswer } from "@/lib/answer-token";
 import { hasAppleCreds } from "@/lib/apple";
 import { isDifficulty } from "@/lib/game-config";
+import { availableHints } from "@/lib/hints";
 import { hasLastfmCreds } from "@/lib/lastfm";
 import { drawTrack } from "@/lib/pool";
 
@@ -28,6 +29,7 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({
       token,
       audioUrl: `/api/audio?t=${encodeURIComponent(token)}`,
+      hintTypes: availableHints(track),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to start a round";

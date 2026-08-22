@@ -1,6 +1,6 @@
 "use client";
 
-import { Flag, Flame, Play, SkipForward, VinylRecord, X } from "@phosphor-icons/react";
+import { Flag, Flame, Lightbulb, Play, SkipForward, VinylRecord, X } from "@phosphor-icons/react";
 import { useCallback, useState } from "react";
 import GuessSearch from "@/components/GuessSearch";
 import PlayerDisc, { DISC_SIZE } from "@/components/PlayerDisc";
@@ -10,6 +10,7 @@ import SetupBanner from "@/components/SetupBanner";
 import StageBar from "@/components/StageBar";
 import TierLadder from "@/components/TierLadder";
 import { STAGES, difficultyMeta, type Difficulty } from "@/lib/game-config";
+import { hintLabel, type HintType } from "@/lib/hints";
 import { applyResult, jumpTo, type Progress } from "@/lib/progression";
 import {
   defaultSettings,
@@ -20,7 +21,13 @@ import {
 } from "@/lib/settings";
 import { loadStats, recordLoss, recordWin, type Stats } from "@/lib/stats";
 import { TIER_STYLES } from "@/lib/tier-styles";
-import type { GuessResponse, PublicAnswer, RoundData, SearchResult } from "@/lib/types";
+import type {
+  GuessResponse,
+  HintResponse,
+  PublicAnswer,
+  RoundData,
+  SearchResult,
+} from "@/lib/types";
 import { useIsClient } from "@/lib/use-is-client";
 import { usePreviewPlayer } from "@/lib/use-preview-player";
 
@@ -43,12 +50,19 @@ interface WrongGuess {
   kind: "wrong" | "skip";
 }
 
+interface RevealedHint {
+  key: number;
+  type: HintType;
+  text?: string;
+}
+
 export default function Game({ ready }: { ready: boolean }) {
   const isClient = useIsClient();
   const [phase, setPhase] = useState<Phase>({ kind: "home" });
   const [progressState, setProgress] = useState<Progress | null>(null);
   const [stagesState, setEnabledStages] = useState<number[] | null>(null);
   const [wrongGuesses, setWrongGuesses] = useState<WrongGuess[]>([]);
+  const [revealedHints, setRevealedHints] = useState<RevealedHint[]>([]);
   const [statsState, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shakeSignal, setShakeSignal] = useState(0);
@@ -87,6 +101,7 @@ export default function Game({ ready }: { ready: boolean }) {
       player.unlock();
       setError(null);
       setWrongGuesses([]);
+      setRevealedHints([]);
       player.reset();
       setPhase({ kind: "loading", difficulty });
       try {
@@ -113,8 +128,11 @@ export default function Game({ ready }: { ready: boolean }) {
     ) => {
       player.stop();
       const won = result === "won";
+      const hintsUsed = revealedHints.length;
       setStats(
-        won ? recordWin((STAGES as readonly number[]).indexOf(wonAtSeconds!)) : recordLoss()
+        won
+          ? recordWin((STAGES as readonly number[]).indexOf(wonAtSeconds!), hintsUsed)
+          : recordLoss(hintsUsed)
       );
       const update = applyResult(progress ?? jumpTo(difficulty), won);
       const tierChange: TierChange | null = update.promoted
@@ -128,7 +146,7 @@ export default function Game({ ready }: { ready: boolean }) {
       // Let the reveal animate in, then play the full preview as the payoff.
       setTimeout(() => player.playFull(), 450);
     },
-    [player, progress]
+    [player, progress, revealedHints.length]
   );
 
   const advanceStage = useCallback(() => {
@@ -206,6 +224,36 @@ export default function Game({ ready }: { ready: boolean }) {
     [phase, busy, finishRound]
   );
 
+  const takeHint = useCallback(async () => {
+    if (phase.kind !== "playing" || busy) return;
+    const { round } = phase;
+    // Re-check under the latest state: a hint must always leave a stage to
+    // burn (never converts to a loss like Skip) and a rung to reveal.
+    const isLast = clampIndex(phase.stageIndex) === stages.length - 1;
+    const hintIndex = revealedHints.length;
+    if (isLast || hintIndex >= round.hintTypes.length) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/hint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: round.token, hintIndex }),
+      });
+      if (!res.ok) throw new Error();
+      const { hint } = (await res.json()) as HintResponse;
+      setRevealedHints((h) => [
+        ...h,
+        { key: Date.now(), type: hint.type, text: "text" in hint ? hint.text : undefined },
+      ]);
+      advanceStage();
+    } catch {
+      // A failed hint burns nothing.
+      setError("Could not fetch a hint. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }, [phase, busy, stages, clampIndex, revealedHints.length, advanceStage]);
+
   const skipStage = useCallback(() => {
     if (phase.kind !== "playing") return;
     const isLast = clampIndex(phase.stageIndex) === stages.length - 1;
@@ -233,6 +281,9 @@ export default function Game({ ready }: { ready: boolean }) {
   const currentIndex = playing ? clampIndex(playing.stageIndex) : 0;
   const nextStage =
     playing && currentIndex < stages.length - 1 ? stages[currentIndex + 1] : null;
+  const nextHintType = playing
+    ? (playing.round.hintTypes[revealedHints.length] ?? null)
+    : null;
   const tier = progress?.tier ?? "easy";
 
   return (
@@ -402,6 +453,28 @@ export default function Game({ ready }: { ready: boolean }) {
               </button>
               <button
                 type="button"
+                onClick={() => void takeHint()}
+                disabled={busy || nextStage == null || nextHintType == null}
+                title={
+                  nextStage == null
+                    ? "No hints on the last stage"
+                    : nextHintType == null
+                      ? "No hints left"
+                      : undefined
+                }
+                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Lightbulb size={15} aria-hidden />
+                {nextStage == null ? (
+                  "Hint"
+                ) : nextHintType == null ? (
+                  "No hints left"
+                ) : (
+                  <>Hint · {hintLabel(nextHintType)}</>
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => void revealAnswer("gaveup")}
                 disabled={busy}
                 className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm text-faint outline-none transition-colors duration-200 hover:text-bad focus-visible:ring-2 focus-visible:ring-bad disabled:opacity-50"
@@ -410,6 +483,39 @@ export default function Game({ ready }: { ready: boolean }) {
                 Give up
               </button>
             </div>
+
+            {revealedHints.length > 0 && (
+              <ul aria-label="Hints" className="mt-5 flex flex-wrap items-center gap-2">
+                {revealedHints.map((h) => (
+                  <li
+                    key={h.key}
+                    className="flex animate-pop-in items-center gap-1.5 rounded-full border border-accent/30 bg-accent/5 px-3 py-1 text-xs text-dim"
+                  >
+                    {h.type === "art" ? (
+                      <>
+                        <span className="text-faint">{hintLabel(h.type)}</span>
+                        <span className="size-12 overflow-hidden rounded-md">
+                          {/* eslint-disable-next-line @next/next/no-img-element -- deliberately degraded 40×40 proxy; next/image optimization has nothing to gain */}
+                          <img
+                            src={`/api/hint?t=${encodeURIComponent(playing.round.token)}`}
+                            alt="Blurred album art hint"
+                            className="size-full scale-110 object-cover blur-[6px]"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                            }}
+                          />
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-faint">{hintLabel(h.type)}</span>
+                        <span className="font-medium text-ink">{h.text}</span>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
 
             {wrongGuesses.length > 0 && (
               <ul aria-label="Previous guesses" className="mt-5 flex flex-wrap gap-2">

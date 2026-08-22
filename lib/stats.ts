@@ -11,6 +11,7 @@ export interface Stats {
   bestStreak: number;
   /** Wins indexed by the stage they were won at. */
   stageWins: number[];
+  hintsUsed: number;
 }
 
 function emptyStats(): Stats {
@@ -20,6 +21,7 @@ function emptyStats(): Stats {
     streak: 0,
     bestStreak: 0,
     stageWins: Array.from(STAGES, () => 0),
+    hintsUsed: 0,
   };
 }
 
@@ -44,19 +46,21 @@ function save(stats: Stats): Stats {
   return stats;
 }
 
-export function recordWin(stageIndex: number): Stats {
+export function recordWin(stageIndex: number, hintsUsed = 0): Stats {
   const stats = loadStats();
   stats.plays += 1;
   stats.wins += 1;
   stats.streak += 1;
   stats.bestStreak = Math.max(stats.bestStreak, stats.streak);
   stats.stageWins[stageIndex] = (stats.stageWins[stageIndex] ?? 0) + 1;
+  stats.hintsUsed += hintsUsed;
   return save(stats);
 }
 
-export function recordLoss(): Stats {
+export function recordLoss(hintsUsed = 0): Stats {
   const stats = loadStats();
   stats.plays += 1;
   stats.streak = 0;
+  stats.hintsUsed += hintsUsed;
   return save(stats);
 }
