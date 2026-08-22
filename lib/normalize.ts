@@ -102,3 +102,32 @@ export function artistsMatch(a: string[], b: string[]): boolean {
   const setA = new Set(a.map(normalizeArtist).filter(Boolean));
   return b.map(normalizeArtist).some((artist) => artist && setA.has(artist));
 }
+
+/**
+ * True when the query plausibly names this song — matching its title or one of
+ * its artists — rather than merely occurring somewhere in its lyrics.
+ *
+ * Apple's catalog search indexes lyrics, so "is this the real life" hands back
+ * Bohemian Rhapsody and the autocomplete answers the round for you. Suggestions
+ * are filtered through this so you still have to know what the song is called.
+ */
+const ARTICLES = new Set(["the", "a", "an"]);
+
+export function queryMatchesSong(query: string, title: string, artists: string[]): boolean {
+  const q = normalizeTitle(query);
+  if (!q) return false;
+  const haystack = [normalizeTitle(title), ...artists.map(normalizeArtist)]
+    .filter(Boolean)
+    .join(" ");
+  if (!haystack) return false;
+  // Straight prefix/substring: typing the title, or part of it.
+  if (haystack.includes(q)) return true;
+  // Otherwise every word typed must be starting a word of the title or artist,
+  // which allows "take on me a ha" and rejects a stray line of the chorus.
+  // Articles are dropped first: normalizeArtist already strips a leading "the",
+  // so "the beatles hey jude" would otherwise match nothing.
+  const hayTokens = haystack.split(" ");
+  const tokens = q.split(" ").filter((token) => !ARTICLES.has(token));
+  if (tokens.length === 0) return false;
+  return tokens.every((token) => hayTokens.some((word) => word.startsWith(token)));
+}

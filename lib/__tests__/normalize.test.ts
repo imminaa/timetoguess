@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { artistsMatch, cleanTitle, normalizeTitle, titlesMatch } from "@/lib/normalize";
+import {
+  artistsMatch,
+  cleanTitle,
+  normalizeTitle,
+  queryMatchesSong,
+  titlesMatch,
+} from "@/lib/normalize";
 
 describe("normalizeTitle", () => {
   it("strips remaster suffixes", () => {
@@ -77,5 +83,54 @@ describe("cleanTitle", () => {
 
   it("leaves meaningful brackets alone", () => {
     expect(cleanTitle("Sit Down (Reprise)")).toBe("Sit Down (Reprise)");
+  });
+});
+
+describe("queryMatchesSong", () => {
+  const bohemian: [string, string[]] = ["Bohemian Rhapsody", ["Queen"]];
+
+  it("rejects lyrics that name neither the title nor the artist", () => {
+    expect(queryMatchesSong("is this the real life", ...bohemian)).toBe(false);
+    expect(queryMatchesSong("just a poor boy", ...bohemian)).toBe(false);
+    expect(queryMatchesSong("billie jean is not my lover", "Billie Jean", ["Michael Jackson"])).toBe(
+      false
+    );
+  });
+
+  it("accepts the title, partially typed", () => {
+    expect(queryMatchesSong("bohem", ...bohemian)).toBe(true);
+    expect(queryMatchesSong("Bohemian Rhapsody", ...bohemian)).toBe(true);
+    expect(queryMatchesSong("rhapsody", ...bohemian)).toBe(true);
+  });
+
+  it("accepts the artist, and title plus artist together", () => {
+    expect(queryMatchesSong("queen", ...bohemian)).toBe(true);
+    expect(queryMatchesSong("bohemian rhapsody queen", ...bohemian)).toBe(true);
+    expect(queryMatchesSong("take on me a-ha", "Take On Me", ["a-ha"])).toBe(true);
+  });
+
+  it("ignores punctuation, case, and diacritics", () => {
+    expect(queryMatchesSong("dont stop", "Don't Stop Me Now", ["Queen"])).toBe(true);
+    expect(queryMatchesSong("beyonce halo", "Halo", ["Beyoncé"])).toBe(true);
+  });
+
+  it("still matches across release noise in the catalog title", () => {
+    expect(queryMatchesSong("africa", "Africa (Remastered 2011)", ["TOTO"])).toBe(true);
+  });
+
+  it("tolerates articles the artist normalizer strips", () => {
+    expect(queryMatchesSong("the beatles hey jude", "Hey Jude", ["The Beatles"])).toBe(true);
+    expect(queryMatchesSong("the killers mr brightside", "Mr. Brightside", ["The Killers"])).toBe(
+      true
+    );
+  });
+
+  it("rejects a query that is only articles", () => {
+    expect(queryMatchesSong("the", "Hey Jude", ["The Beatles"])).toBe(false);
+  });
+
+  it("rejects an empty or punctuation-only query", () => {
+    expect(queryMatchesSong("", ...bohemian)).toBe(false);
+    expect(queryMatchesSong("...", ...bohemian)).toBe(false);
   });
 });
