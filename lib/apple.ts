@@ -99,24 +99,39 @@ function mapSong(raw: RawSong): AppleSong | null {
   };
 }
 
-async function appleFetch<T>(path: string): Promise<T> {
+/** Apple throttles hard and briefly; a couple of backed-off retries clear it. */
+const RATE_LIMIT_RETRIES = 3;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function appleFetch<T>(path: string, storefront: string = STOREFRONT): Promise<T> {
   const token = await developerToken();
-  const res = await fetch(`https://api.music.apple.com/v1/catalog/${STOREFRONT}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (res.status === 401 || res.status === 403) {
-    throw new Error(
-      "Apple Music API rejected the developer token. Check APPLE_TEAM_ID / APPLE_KEY_ID / private key."
-    );
+  const url = `https://api.music.apple.com/v1/catalog/${storefront}${path}`;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        "Apple Music API rejected the developer token. Check APPLE_TEAM_ID / APPLE_KEY_ID / private key."
+      );
+    }
+    if (res.status === 429) {
+      if (attempt >= RATE_LIMIT_RETRIES) throw new Error("Apple Music API rate limit hit");
+      const retryAfter = Number(res.headers.get("retry-after"));
+      await sleep(
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : 500 * 2 ** attempt
+      );
+      continue;
+    }
+    if (!res.ok) {
+      throw new Error(`Apple Music API request failed: ${res.status}`);
+    }
+    return (await res.json()) as T;
   }
-  if (res.status === 429) {
-    throw new Error("Apple Music API rate limit hit");
-  }
-  if (!res.ok) {
-    throw new Error(`Apple Music API request failed: ${res.status}`);
-  }
-  return (await res.json()) as T;
 }
 
 export async function searchSongs(
@@ -188,4 +203,70 @@ export async function songArtistId(songId: string): Promise<string | null> {
     `/songs/${songId}?include=artists`
   );
   return data.data?.[0]?.relationships?.artists?.data?.[0]?.id ?? null;
+}
+
+/**
+ * Apple localizes editorial playlist names per storefront ("Top 100: Germany"
+ * becomes "Top 100: Deutschland" on `de`), so anything that matches names has
+ * to ask a fixed storefront. `us` is the only one guaranteed to speak English.
+ */
+const NAMING_STOREFRONT = "us";
+
+export interface PlaylistRef {
+  id: string;
+  name: string;
+  curator: string;
+}
+
+interface RawPlaylist {
+  id: string;
+  attributes?: { name?: string; curatorName?: string };
+  relationships?: { tracks?: { data?: RawSong[] } };
+}
+
+function mapPlaylist(raw: RawPlaylist): PlaylistRef {
+  return {
+    id: raw.id,
+    name: raw.attributes?.name ?? "",
+    curator: raw.attributes?.curatorName ?? "",
+  };
+}
+
+/** Editorial playlists matching a term — the only way to find the ids, which
+ *  Apple documents nowhere. */
+export async function searchPlaylists(
+  term: string,
+  { limit = 5 }: { limit?: number } = {}
+): Promise<PlaylistRef[]> {
+  const params = new URLSearchParams({ term, types: "playlists", limit: String(limit) });
+  const data = await appleFetch<{ results?: { playlists?: { data?: RawPlaylist[] } } }>(
+    `/search?${params}`,
+    NAMING_STOREFRONT
+  );
+  return (data.results?.playlists?.data ?? []).map(mapPlaylist);
+}
+
+/** The daily "Top 100: <Country>" chart playlists, including "Top 100: Global". */
+export async function dailyTopChartPlaylists(): Promise<PlaylistRef[]> {
+  const data = await appleFetch<{
+    results?: { dailyGlobalTopCharts?: { data?: RawPlaylist[] }[] };
+  }>(`/charts?types=songs&chart=daily-global-top&limit=200`, NAMING_STOREFRONT);
+  return (data.results?.dailyGlobalTopCharts?.[0]?.data ?? []).map(mapPlaylist);
+}
+
+/**
+ * A playlist's tracks. Editorial and chart playlists top out around 100.
+ *
+ * Playlist ids are storefront-independent, but the *songs* inside them are not:
+ * read from the configured storefront so ids, previews and availability line up
+ * with everything else the app fetches.
+ */
+export async function playlistSongs(playlistId: string): Promise<AppleSong[]> {
+  // Raw brackets: URLSearchParams percent-encodes them and Apple wants them literal.
+  const data = await appleFetch<{ data?: RawPlaylist[] }>(
+    `/playlists/${playlistId}?include=tracks&limit[tracks]=100`
+  );
+  return (data.data?.[0]?.relationships?.tracks?.data ?? [])
+    .map(mapSong)
+    .filter((s): s is AppleSong => s !== null);
 }

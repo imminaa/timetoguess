@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artistsMatch, normalizeTitle, titlesMatch } from "@/lib/normalize";
+import { artistsMatch, cleanTitle, normalizeTitle, titlesMatch } from "@/lib/normalize";
 
 describe("normalizeTitle", () => {
   it("strips remaster suffixes", () => {
@@ -57,5 +57,25 @@ describe("artistsMatch", () => {
 
   it("rejects disjoint artist lists", () => {
     expect(artistsMatch(["Toto"], ["Africa by Toto Tribute Band X"])).toBe(false);
+  });
+});
+
+describe("cleanTitle", () => {
+  it("strips release noise but stays human-readable for third-party lookups", () => {
+    // Last.fm scrobbles live under the plain title; Apple ships the decorated one.
+    expect(cleanTitle("Africa (Remastered 2011)")).toBe("Africa");
+    expect(cleanTitle("Bohemian Rhapsody - Remastered 2011")).toBe("Bohemian Rhapsody");
+    expect(cleanTitle("Yeah! (feat. Lil Jon & Ludacris)")).toBe("Yeah!");
+    expect(cleanTitle("Rock with You (Single Version)")).toBe("Rock with You");
+  });
+
+  it("keeps the casing and punctuation a lookup needs to match on", () => {
+    expect(cleanTitle("Don't Stop Me Now")).toBe("Don't Stop Me Now");
+    expect(cleanTitle("HUMBLE.")).toBe("HUMBLE.");
+    expect(cleanTitle("Beyoncé")).toBe("Beyoncé");
+  });
+
+  it("leaves meaningful brackets alone", () => {
+    expect(cleanTitle("Sit Down (Reprise)")).toBe("Sit Down (Reprise)");
   });
 });

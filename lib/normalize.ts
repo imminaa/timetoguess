@@ -60,6 +60,18 @@ function stripNoisySuffixes(value: string): string {
   }
 }
 
+/**
+ * Strip release noise but keep the human-readable form. `normalizeTitle` is for
+ * comparing two strings we already have; this is for handing a title to a
+ * third party that matches on display text ("Africa (Remastered 2011)" → "Africa").
+ */
+export function cleanTitle(title: string): string {
+  return stripNoisySuffixes(stripNoisyBrackets(title))
+    .replace(/\s+(?:feat\.?|featuring|ft\.?)\s+.*$/i, "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 export function normalizeTitle(title: string): string {
   let out = stripDiacritics(title.toLowerCase());
   out = stripNoisyBrackets(out);

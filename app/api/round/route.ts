@@ -1,12 +1,13 @@
 import { encryptAnswer } from "@/lib/answer-token";
 import { hasAppleCreds } from "@/lib/apple";
 import { isDifficulty } from "@/lib/game-config";
+import { hasLastfmCreds } from "@/lib/lastfm";
 import { drawTrack } from "@/lib/pool";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<Response> {
-  if (!hasAppleCreds()) {
+  if (!hasAppleCreds() || !hasLastfmCreds()) {
     return Response.json({ error: "setup" }, { status: 503 });
   }
   const difficulty = new URL(req.url).searchParams.get("difficulty") ?? "";

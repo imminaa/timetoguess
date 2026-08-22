@@ -26,11 +26,25 @@ export default function SetupBanner() {
           enabled and download the <code className="text-ink">.p8</code> file.
         </li>
         <li>
+          Grab a free{" "}
+          <a
+            href="https://www.last.fm/api/account/create"
+            target="_blank"
+            rel="noreferrer"
+            className="text-ink underline decoration-line-strong underline-offset-2 hover:decoration-accent"
+          >
+            Last.fm API key
+          </a>
+          . It supplies the global play counts that decide how well-known a song
+          is — Apple Music publishes no such number.
+        </li>
+        <li>
           Copy <code className="text-ink">.env.example</code> to{" "}
           <code className="text-ink">.env.local</code>: set{" "}
           <code className="text-ink">APPLE_TEAM_ID</code>,{" "}
           <code className="text-ink">APPLE_KEY_ID</code>, and{" "}
-          <code className="text-ink">APPLE_PRIVATE_KEY_PATH</code> (path to the .p8).
+          <code className="text-ink">APPLE_PRIVATE_KEY_PATH</code> (path to the .p8),
+          and <code className="text-ink">LASTFM_API_KEY</code>.
         </li>
         <li>Restart the dev server, then hit play.</li>
       </ol>

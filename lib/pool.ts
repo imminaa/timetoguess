@@ -2,31 +2,33 @@ import {
   albumSongs,
   artistAlbumIds,
   artistTopSongs,
-  chartSongs,
   searchSongs,
   songArtistId,
   type AppleSong,
 } from "@/lib/apple";
 import type { Difficulty } from "@/lib/game-config";
 import { normalizeArtist, normalizeTitle } from "@/lib/normalize";
+import { BANDS, famousSongs, sampleBand } from "@/lib/popularity";
 
 /**
- * Per-difficulty candidate pools, built Apple-natively (the Apple Music API
- * exposes no per-song popularity number):
+ * Per-difficulty candidate pools.
  *
- * - easy       most-played chart, top of the list
- * - medium     deeper chart cuts + genre charts
- * - hard       lower top-songs (ranks 6+) of chart artists
- * - expert     album tracks of chart artists that are NOT in the artist's
- *              top songs — the classic "deep cut"
+ * Every tier is anchored to the all-era canon in lib/canon.ts, ranked by
+ * Last.fm listener counts in lib/popularity.ts. Anchoring to charts instead —
+ * as this used to — meant "popular" could only ever mean "popular this week",
+ * so no song older than the current chart cycle could appear at any tier.
+ *
+ * - easy       top fifth of the canon by listeners: the songs everyone knows,
+ *              from Billie Jean to whatever is number one today
+ * - medium     the next band down — big songs, slightly off the A-list
+ * - hard       lower top-songs (ranks 6+) of a famous artist
+ * - expert     album tracks of a famous artist that are NOT in their top
+ *              songs — the classic "deep cut"
  * - impossible search results for obscure words, skipping the head of the list
  *
  * Pools are in-memory per server process; rounds pop candidates until one
  * has a playable preview.
  */
-
-/** Apple Music genre ids for genre-scoped charts. */
-const GENRE_IDS = [14, 21, 18, 20, 17, 15, 6, 11, 7]; // pop rock hip-hop alt dance r&b country jazz electronic
 
 /** Evocative but uncommon words — their search results are mostly deep cuts. */
 const DEEP_WORDS = [
@@ -41,6 +43,9 @@ const DEEP_WORDS = [
 const JUNK_RE =
   /(karaoke|tribute|originally performed|made famous|in the style of|8[- ]?bit|lullab|instrumental|sped[- ]?up|slowed|nightcore|workout|fitness|meditat|rain sounds|white noise|asmr|sleep music|commentary|interlude|skit|intro|outro)/i;
 
+/** Errors that mean "misconfigured", not "unlucky draw" — never swallowed. */
+const SETUP_ERROR_RE = /developer token|APPLE_|LASTFM_|Last\.fm|canon/i;
+
 const POOL_LOW_WATER = 6;
 /** Cap per generator call so one artist/search word can't flood a pool. */
 const MAX_PER_CALL = 3;
@@ -48,8 +53,8 @@ const MAX_DRAW_ATTEMPTS = 10;
 
 const pools = new Map<Difficulty, AppleSong[]>();
 const served = new Map<Difficulty, Set<string>>();
-/** Chart artists feed the hard/expert generators. */
-let chartArtistSongs: AppleSong[] = [];
+/** Famous songs, whose artists feed the hard/expert generators. */
+let famousPool: AppleSong[] = [];
 
 function randomInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -99,42 +104,37 @@ function addToPool(difficulty: Difficulty, songs: AppleSong[]): void {
   served.set(difficulty, servedIds);
 }
 
-async function chartSample(): Promise<AppleSong[]> {
-  if (chartArtistSongs.length === 0) {
-    chartArtistSongs = await chartSongs({ limit: 50 });
-  }
-  return chartArtistSongs;
-}
-
-/** A random chart artist's id (chart payloads omit it; resolve via the song). */
-async function randomChartArtistId(): Promise<string | null> {
-  const song = pickRandom(await chartSample());
+/**
+ * A random famous artist's id — the "artist you know" that hard and expert
+ * both hang off. Drawing from the canon rather than the chart is what lets
+ * Queen and Nirvana show up alongside this week's names.
+ */
+async function randomFamousArtistId(): Promise<string | null> {
+  if (famousPool.length === 0) famousPool = await famousSongs(60);
+  const song = pickRandom(famousPool);
   if (!song) return null;
+  // Playlist and chart payloads omit the artist id; resolve it via the song.
   return song.artistId ?? songArtistId(song.id);
 }
 
 const generators: Record<Difficulty, () => Promise<AppleSong[]>> = {
   async easy() {
-    return chartSongs({ limit: 50, offset: Math.random() < 0.5 ? 0 : 50 });
+    return sampleBand(BANDS.easy, 20);
   },
 
   async medium() {
-    // Deeper global chart, or the top of a random genre chart.
-    if (Math.random() < 0.5) {
-      return chartSongs({ limit: 50, offset: randomInt(50, 150) });
-    }
-    return chartSongs({ limit: 30, genreId: pickRandom(GENRE_IDS) });
+    return sampleBand(BANDS.medium, 20);
   },
 
   async hard() {
-    const artistId = await randomChartArtistId();
+    const artistId = await randomFamousArtistId();
     if (!artistId) return [];
     // Skip the artist's signature hits; ranks 6+ are the fan-favourite zone.
     return (await artistTopSongs(artistId)).slice(5);
   },
 
   async expert() {
-    const artistId = await randomChartArtistId();
+    const artistId = await randomFamousArtistId();
     if (!artistId) return [];
     const [albumIds, topSongs] = await Promise.all([
       artistAlbumIds(artistId),
@@ -161,8 +161,9 @@ async function topUp(difficulty: Difficulty): Promise<void> {
     try {
       addToPool(difficulty, shuffle(await generators[difficulty]()));
     } catch (err) {
-      // Auth/config errors won't fix themselves — surface them to the route.
-      if (err instanceof Error && /developer token|APPLE_/.test(err.message)) throw err;
+      // Auth/config errors won't fix themselves — surface them to the route
+      // rather than letting the pool look merely empty.
+      if (err instanceof Error && SETUP_ERROR_RE.test(err.message)) throw err;
     }
   }
 }

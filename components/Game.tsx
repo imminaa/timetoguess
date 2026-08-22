@@ -7,7 +7,7 @@ import PlayerDisc from "@/components/PlayerDisc";
 import RevealCard, { type RoundResult, type TierChange } from "@/components/RevealCard";
 import SettingsPanel from "@/components/SettingsPanel";
 import SetupBanner from "@/components/SetupBanner";
-import StageTimeline from "@/components/StageTimeline";
+import StageBar from "@/components/StageBar";
 import TierLadder from "@/components/TierLadder";
 import { STAGES, difficultyMeta, type Difficulty } from "@/lib/game-config";
 import { applyResult, jumpTo, type Progress } from "@/lib/progression";
@@ -363,7 +363,13 @@ export default function Game({ ready }: { ready: boolean }) {
             </p>
 
             <div className="mt-6">
-              <StageTimeline stages={stages} currentIndex={currentIndex} />
+              <StageBar
+                stages={stages}
+                currentIndex={currentIndex}
+                elapsedSeconds={
+                  player.isPlaying ? player.progress * player.clipSeconds : null
+                }
+              />
             </div>
 
             <div className="mt-6">
