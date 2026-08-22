@@ -65,25 +65,26 @@ export default function RevealCard({
         {badge}
       </span>
 
-      <div className="mt-6 w-full rounded-3xl border border-line bg-surface p-6 sm:p-8">
+      <div className="mt-6 w-full rounded-3xl border border-line bg-surface p-5 sm:p-8">
         {answer.artUrl ? (
           <Image
             src={answer.artUrl}
             alt={`Album artwork for ${answer.title}`}
             width={232}
             height={232}
-            className="mx-auto rounded-2xl shadow-[0_24px_70px_-24px_rgba(0,0,0,0.85)]"
+            sizes="232px"
+            className="mx-auto h-auto w-full max-w-[232px] rounded-2xl shadow-[0_24px_70px_-24px_rgba(0,0,0,0.85)]"
             priority
           />
         ) : (
-          <div className="mx-auto flex size-[232px] items-center justify-center rounded-2xl bg-surface-2 text-faint">
+          <div className="mx-auto flex aspect-square w-full max-w-[232px] items-center justify-center rounded-2xl bg-surface-2 text-faint">
             <MusicNotes size={48} aria-hidden />
           </div>
         )}
-        <h2 className="mt-6 font-display text-2xl font-bold tracking-tight">
+        <h2 className="mt-6 text-balance font-display text-2xl font-bold tracking-tight">
           {answer.title}
         </h2>
-        <p className="mt-1 text-dim">{answer.artists.join(", ")}</p>
+        <p className="mt-1 text-pretty text-dim">{answer.artists.join(", ")}</p>
 
         <div className="mt-4 flex items-center justify-center gap-3 text-xs text-faint">
           {answer.year != null && <span className="font-mono">{answer.year}</span>}
@@ -94,7 +95,7 @@ export default function RevealCard({
         <button
           type="button"
           onClick={() => (player.isPlaying ? player.stop() : player.playFull())}
-          className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+          className="mt-5 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
         >
           {player.isPlaying ? (
             <Pause size={16} aria-hidden />
@@ -139,7 +140,7 @@ export default function RevealCard({
         <button
           type="button"
           onClick={onPlayAgain}
-          className="flex h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full bg-accent font-display font-semibold text-bg outline-none transition-all duration-200 hover:bg-accent-strong focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg active:scale-[0.98]"
+          className="flex h-12 min-h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full bg-accent font-display font-semibold text-bg outline-none transition-all duration-200 hover:bg-accent-strong focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg active:scale-[0.98]"
         >
           <ArrowsClockwise size={18} aria-hidden />
           Next song
@@ -147,7 +148,7 @@ export default function RevealCard({
         <button
           type="button"
           onClick={onHome}
-          className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-full border border-line px-6 text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+          className="flex h-12 min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full border border-line px-6 text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Ladder size={16} aria-hidden />
           Tier ladder

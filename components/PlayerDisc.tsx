@@ -10,10 +10,19 @@ interface Props {
   onToggle: () => void;
 }
 
+/**
+ * The disc is the tallest thing on screen, so it — not the copy around it —
+ * decides whether a round fits without scrolling. Bound it by width *and*
+ * height: the dvh term is what keeps the whole game visible on a small phone
+ * and, more importantly, when someone turns one sideways. Exported so the
+ * loading skeleton can hold exactly the same space and nothing jumps.
+ */
+export const DISC_SIZE = "size-[min(13rem,52vw,34dvh)] sm:size-[min(15rem,40dvh)]";
+
 export default function PlayerDisc({ isPlaying, progress, disabled, onToggle }: Props) {
   const angle = progress * 360;
   return (
-    <div className="relative mx-auto size-52 sm:size-60">
+    <div className={`relative mx-auto ${DISC_SIZE}`}>
       <div
         aria-hidden
         className="absolute inset-0 rounded-full"

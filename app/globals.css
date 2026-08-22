@@ -96,6 +96,15 @@
   }
 }
 
+html {
+  /* Rubber-banding past the top or bottom exposes the html background, not the
+     body's — without this, iOS flashes white at the edges of every scroll. */
+  background-color: var(--color-bg);
+  /* Stop Safari inflating body text when the phone is turned to landscape. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   /* A faint overhead stage-light wash over the charcoal base */
   background:
@@ -107,6 +116,30 @@ body {
     var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  /* viewport-fit=cover lets us paint edge to edge; keep content out of the
+     notch, the Dynamic Island and the home indicator. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* A stray downward swipe mid-round would otherwise pull-to-refresh and throw
+     the round away. */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Kill the 300ms double-tap-to-zoom delay on everything you actually tap, and
+   stop rapid taps selecting the label underneath. */
+button,
+a,
+[role="option"],
+input[type="range"] {
+  touch-action: manipulation;
+}
+
+button,
+[role="option"] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* Static film grain; fixed + pointer-events-none so it never repaints on scroll */

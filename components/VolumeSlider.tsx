@@ -14,7 +14,7 @@ export default function VolumeSlider({ volume, onChange }: Props) {
       <Icon size={16} aria-hidden />
       <input
         type="range"
-        className="volume h-1 w-24 cursor-pointer"
+        className="volume h-7 w-24 cursor-pointer"
         min={0}
         max={1}
         step={0.01}

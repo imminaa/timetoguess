@@ -44,7 +44,7 @@ export default function SettingsPanel({
         aria-label="Game settings"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={`flex size-9 cursor-pointer items-center justify-center rounded-full border outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-accent ${
+        className={`flex size-10 cursor-pointer items-center justify-center rounded-full border outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-accent ${
           open
             ? "border-line-strong bg-surface-2 text-ink"
             : "border-line text-dim hover:border-line-strong hover:text-ink"
@@ -57,7 +57,7 @@ export default function SettingsPanel({
         <div
           role="dialog"
           aria-label="Game settings"
-          className="absolute right-0 top-11 z-30 w-72 animate-fade-up rounded-2xl border border-line bg-surface-2 p-5 shadow-[0_24px_60px_-16px_rgba(0,0,0,0.7)] [animation-duration:200ms]"
+          className="absolute right-0 top-12 z-30 w-72 max-w-[calc(100vw-2rem)] animate-fade-up rounded-2xl border border-line bg-surface-2 p-5 shadow-[0_24px_60px_-16px_rgba(0,0,0,0.7)] [animation-duration:200ms]"
         >
           <div className="flex items-center justify-between">
             <h3 className="font-display text-sm font-semibold">Settings</h3>
@@ -65,7 +65,7 @@ export default function SettingsPanel({
               type="button"
               aria-label="Close settings"
               onClick={() => setOpen(false)}
-              className="cursor-pointer rounded p-1 text-faint outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+              className="-m-1.5 cursor-pointer rounded p-1.5 text-faint outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
             >
               <X size={14} aria-hidden />
             </button>
@@ -101,7 +101,7 @@ export default function SettingsPanel({
                     disabled={lastEnabled}
                     title={lastEnabled ? "At least one stage must stay on" : undefined}
                     onClick={() => onToggleStage(s)}
-                    className={`cursor-pointer rounded-full border px-3 py-1.5 font-mono text-xs outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed ${
+                    className={`min-h-10 cursor-pointer rounded-full border px-3.5 py-1.5 font-mono text-xs outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed ${
                       enabled
                         ? "border-accent/60 bg-accent/15 text-accent"
                         : "border-line text-faint hover:border-line-strong hover:text-dim"

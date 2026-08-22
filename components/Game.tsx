@@ -3,7 +3,7 @@
 import { Flag, Flame, Play, SkipForward, VinylRecord, X } from "@phosphor-icons/react";
 import { useCallback, useState } from "react";
 import GuessSearch from "@/components/GuessSearch";
-import PlayerDisc from "@/components/PlayerDisc";
+import PlayerDisc, { DISC_SIZE } from "@/components/PlayerDisc";
 import RevealCard, { type RoundResult, type TierChange } from "@/components/RevealCard";
 import SettingsPanel from "@/components/SettingsPanel";
 import SetupBanner from "@/components/SetupBanner";
@@ -81,6 +81,10 @@ export default function Game({ ready }: { ready: boolean }) {
 
   const startRound = useCallback(
     async (difficulty: Difficulty) => {
+      // Must happen before the first await: iOS only starts an AudioContext
+      // from the synchronous part of a user gesture, and fetching the round
+      // would spend it. Without this the first round is silent.
+      player.unlock();
       setError(null);
       setWrongGuesses([]);
       player.reset();
@@ -233,7 +237,7 @@ export default function Game({ ready }: { ready: boolean }) {
 
   return (
     <div className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pb-12 pt-6 sm:px-6">
-      <header className="mb-8 flex items-center justify-between">
+      <header className="mb-6 flex items-center justify-between sm:mb-8">
         <button
           type="button"
           onClick={goHome}
@@ -247,7 +251,7 @@ export default function Game({ ready }: { ready: boolean }) {
             TimeToGuess
           </span>
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {stats && stats.streak > 0 && (
             <span className="flex items-center gap-1 rounded-full border border-tier-hard/30 bg-tier-hard/10 px-2.5 py-1 text-xs font-medium text-tier-hard">
               <Flame size={13} weight="fill" aria-hidden />
@@ -313,7 +317,7 @@ export default function Game({ ready }: { ready: boolean }) {
 
         {phase.kind === "loading" && (
           <div className="flex animate-fade-up flex-col items-center gap-6 py-10">
-            <div className="size-52 animate-pulse rounded-full border border-line bg-surface sm:size-60" />
+            <div className={`animate-pulse rounded-full border border-line bg-surface ${DISC_SIZE}`} />
             <p className="text-sm text-dim" role="status">
               Dropping the needle…
             </p>
@@ -322,7 +326,7 @@ export default function Game({ ready }: { ready: boolean }) {
 
         {playing && (
           <section className="animate-fade-up">
-            <div className="mb-8 flex items-center justify-center">
+            <div className="mb-6 flex items-center justify-center sm:mb-8">
               <span
                 className={`rounded-full border px-3 py-1 text-xs font-semibold ${TIER_STYLES[playing.difficulty].chip}`}
               >
@@ -380,12 +384,12 @@ export default function Game({ ready }: { ready: boolean }) {
               />
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={skipStage}
                 disabled={busy}
-                className="flex cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-dim outline-none transition-colors duration-200 hover:border-line-strong hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
               >
                 <SkipForward size={15} aria-hidden />
                 {nextStage != null ? (
@@ -400,7 +404,7 @@ export default function Game({ ready }: { ready: boolean }) {
                 type="button"
                 onClick={() => void revealAnswer("gaveup")}
                 disabled={busy}
-                className="flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm text-faint outline-none transition-colors duration-200 hover:text-bad focus-visible:ring-2 focus-visible:ring-bad disabled:opacity-50"
+                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm text-faint outline-none transition-colors duration-200 hover:text-bad focus-visible:ring-2 focus-visible:ring-bad disabled:opacity-50"
               >
                 <Flag size={15} aria-hidden />
                 Give up
@@ -419,7 +423,7 @@ export default function Game({ ready }: { ready: boolean }) {
                     }`}
                   >
                     {g.kind === "wrong" && <X size={11} aria-hidden className="text-bad" />}
-                    <span className="max-w-52 truncate">{g.label}</span>
+                    <span className="max-w-[min(13rem,60vw)] truncate">{g.label}</span>
                   </li>
                 ))}
               </ul>
@@ -442,7 +446,7 @@ export default function Game({ ready }: { ready: boolean }) {
         )}
       </main>
 
-      <footer className="mt-10 text-center text-xs text-faint">
+      <footer className="mt-10 text-center text-xs text-balance text-faint">
         Powered by Apple Music · not affiliated with Apple
       </footer>
     </div>
