@@ -13,9 +13,21 @@ import { mapAtLookupRate, trackPopularity } from "@/lib/lastfm";
 
 export interface ScoredSong {
   song: AppleSong;
-  /** Distinct Last.fm listeners — the ranking key. */
+  /** Distinct Last.fm listeners. */
   listeners: number;
   plays: number;
+  /** Decade the song belongs to, e.g. "1980". */
+  cohort: string;
+  /** Listeners relative to the median of its own decade — the ranking key. */
+  score: number;
+}
+
+/** Raw measurement, before it can be scored against its cohort. */
+interface Measured {
+  song: AppleSong;
+  listeners: number;
+  plays: number;
+  cohort: string;
 }
 
 /** Quantile of the canon, most-listened first, that each tier draws from. */
@@ -30,11 +42,55 @@ export const BANDS = {
  * place the boundaries; scoring all ~1500 up front would cost a five-minute
  * first round for no extra accuracy.
  */
-const MIN_SCORED = 150;
-const BLOCK = 150;
+const MIN_SCORED = 250;
+const BLOCK = 125;
+
+/**
+ * Last.fm counts accumulate for as long as a song has existed, so a brand-new
+ * release is structurally penalised: measured live, today's Top 100: Global has
+ * a median of ~219k listeners against ~1.0M for 2000s and 2010s hits — a 4.6x
+ * handicap for being new, enough to file this week's number one under "hard".
+ *
+ * Ranking each song against the median of its own decade removes that. The
+ * 1980s–2010s medians sit within 1.4x of each other, so their relative order
+ * barely moves; it is the recent cohort that gets lifted to where it belongs.
+ */
+function cohortOf(song: AppleSong): string {
+  return song.year ? String(Math.floor(song.year / 10) * 10) : "unknown";
+}
+
+/** Below this a decade has too few samples to trust its own median. */
+const MIN_COHORT = 8;
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
 
 let queue: AppleSong[] | null = null;
-const scored: ScoredSong[] = [];
+const measured: Measured[] = [];
+let ranked: ScoredSong[] = [];
+let rankedAt = -1;
+
+/** Score every measurement against its decade, most-famous-for-its-era first. */
+function rank(): ScoredSong[] {
+  if (rankedAt === measured.length) return ranked;
+  const byCohort = new Map<string, number[]>();
+  for (const m of measured) {
+    byCohort.set(m.cohort, [...(byCohort.get(m.cohort) ?? []), m.listeners]);
+  }
+  const overall = median(measured.map((m) => m.listeners)) || 1;
+  const baseline = new Map<string, number>();
+  for (const [key, listeners] of byCohort) {
+    baseline.set(key, listeners.length >= MIN_COHORT ? median(listeners) || overall : overall);
+  }
+  ranked = measured
+    .map((m) => ({ ...m, score: m.listeners / (baseline.get(m.cohort) ?? overall) }))
+    .sort((a, b) => b.score - a.score || b.listeners - a.listeners);
+  rankedAt = measured.length;
+  return ranked;
+}
 
 function shuffle<T>(items: readonly T[]): T[] {
   const out = [...items];
@@ -53,29 +109,28 @@ async function scoreBlock(): Promise<boolean> {
   const results = await mapAtLookupRate(batch, async (song) => {
     // Last.fm files collaborations under the lead artist, which is Apple's first.
     const found = await trackPopularity(song.artists[0] ?? "", song.title);
-    return found ? { song, ...found } : null;
+    return found ? { song, ...found, cohort: cohortOf(song) } : null;
   });
   // Songs Last.fm has never seen are not "popular" by any reading — drop them.
-  scored.push(...results.filter((r): r is ScoredSong => r !== null));
-  scored.sort((a, b) => b.listeners - a.listeners || b.plays - a.plays);
+  measured.push(...results.filter((r): r is Measured => r !== null));
   return true;
 }
 
 async function ensureScored(min: number): Promise<void> {
-  while (scored.length < min) {
+  while (measured.length < min) {
     if (!(await scoreBlock())) break;
   }
-  if (scored.length === 0) {
+  if (measured.length === 0) {
     throw new Error(
       "Last.fm returned no popularity data for any canon song. Check LASTFM_API_KEY."
     );
   }
 }
 
-/** Everything scored so far, most-listened first. Exported for the calibration script. */
+/** Everything scored so far, best-known first. Exported for the calibration script. */
 export async function popularitySnapshot(min = MIN_SCORED): Promise<ScoredSong[]> {
   await ensureScored(min);
-  return [...scored];
+  return [...rank()];
 }
 
 /** A random sample of canon songs whose popularity falls inside `band`. */
@@ -84,9 +139,10 @@ export async function sampleBand(
   want: number
 ): Promise<AppleSong[]> {
   await ensureScored(MIN_SCORED);
-  const from = Math.floor(scored.length * band[0]);
-  const to = Math.max(from + 1, Math.ceil(scored.length * band[1]));
-  return shuffle(scored.slice(from, to))
+  const all = rank();
+  const from = Math.floor(all.length * band[0]);
+  const to = Math.max(from + 1, Math.ceil(all.length * band[1]));
+  return shuffle(all.slice(from, to))
     .slice(0, want)
     .map((s) => s.song);
 }

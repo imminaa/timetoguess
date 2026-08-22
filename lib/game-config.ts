@@ -19,7 +19,7 @@ export const DIFFICULTIES: DifficultyMeta[] = [
   {
     id: "easy",
     label: "Easy",
-    tagline: "Today's chart megahits",
+    tagline: "The songs everybody knows",
   },
   {
     id: "medium",

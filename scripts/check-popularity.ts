@@ -19,7 +19,7 @@ function decade(year: number | null): string {
 
 function line(s: ScoredSong): string {
   const listeners = s.listeners.toLocaleString("en-US").padStart(9);
-  return `${listeners}  ${decade(s.song.year)}  ${s.song.title} — ${s.song.artists[0]}`;
+  return `${s.score.toFixed(2).padStart(5)}x  ${listeners}  ${decade(s.song.year)}  ${s.song.title} — ${s.song.artists[0]}`;
 }
 
 async function main() {
@@ -64,7 +64,10 @@ async function main() {
 
   const at = (q: number) => scored[Math.min(scored.length - 1, Math.floor(scored.length * q))];
   for (const q of [0, 0.2, 0.5, 0.8, 0.99]) {
-    console.log(`  p${String(Math.round(q * 100)).padStart(2)} listeners: ${at(q).listeners.toLocaleString("en-US")}`);
+    const s = at(q);
+    console.log(
+      `  p${String(Math.round(q * 100)).padStart(2)}  score ${s.score.toFixed(2).padStart(6)}  (${s.listeners.toLocaleString("en-US")} listeners, ${s.cohort}s)`
+    );
   }
 
   for (const [tier, band] of Object.entries(BANDS)) {
