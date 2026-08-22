@@ -20,6 +20,7 @@ import {
   saveSettings,
 } from "@/lib/settings";
 import { loadStats, recordLoss, recordWin, type Stats } from "@/lib/stats";
+import { clearStoredData } from "@/lib/storage";
 import { TIER_STYLES } from "@/lib/tier-styles";
 import type {
   GuessResponse,
@@ -29,7 +30,7 @@ import type {
   SearchResult,
 } from "@/lib/types";
 import { useIsClient } from "@/lib/use-is-client";
-import { usePreviewPlayer } from "@/lib/use-preview-player";
+import { DEFAULT_VOLUME, usePreviewPlayer } from "@/lib/use-preview-player";
 
 type Phase =
   | { kind: "home" }
@@ -272,6 +273,24 @@ export default function Game({ ready }: { ready: boolean }) {
     setPhase({ kind: "home" });
   }, [player]);
 
+  const resetEverything = useCallback(() => {
+    // Volume first: setVolume persists, so clearing afterwards leaves nothing
+    // behind. Then drop every cached slice back to null so the loaders re-read
+    // the now-empty storage and hand back defaults.
+    player.setVolume(DEFAULT_VOLUME);
+    clearStoredData();
+    setStats(null);
+    setProgress(null);
+    setEnabledStages(null);
+    setWrongGuesses([]);
+    setRevealedHints([]);
+    setError(null);
+    // A round in flight was started under the old progress — finishing it
+    // would write that progress straight back.
+    player.reset();
+    setPhase({ kind: "home" });
+  }, [player]);
+
   const jumpTier = useCallback((tier: Difficulty) => {
     const next = jumpTo(tier);
     saveProgress(next);
@@ -320,6 +339,7 @@ export default function Game({ ready }: { ready: boolean }) {
             onVolume={player.setVolume}
             enabledStages={enabledStages}
             onToggleStage={toggleStage}
+            onReset={resetEverything}
           />
         </div>
       </header>

@@ -1,7 +1,7 @@
 "use client";
 
-import { GearSix, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowCounterClockwise, GearSix, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import VolumeSlider from "@/components/VolumeSlider";
 import { STAGES } from "@/lib/game-config";
 
@@ -10,6 +10,8 @@ interface Props {
   onVolume: (v: number) => void;
   enabledStages: number[];
   onToggleStage: (seconds: number) => void;
+  /** Wipes stats, tier progress and settings. */
+  onReset: () => void;
 }
 
 export default function SettingsPanel({
@@ -17,17 +19,32 @@ export default function SettingsPanel({
   onVolume,
   enabledStages,
   onToggleStage,
+  onReset,
 }: Props) {
   const [open, setOpen] = useState(false);
+  // Reset is destructive and there is no modal in this app, so the button
+  // arms itself on the first press and fires on the second.
+  const [confirming, setConfirming] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  const closePanel = useCallback(() => {
+    setOpen(false);
+    setConfirming(false);
+  }, []);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const t = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirming]);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!wrapRef.current?.contains(e.target as Node)) closePanel();
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closePanel();
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", esc);
@@ -35,7 +52,7 @@ export default function SettingsPanel({
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("keydown", esc);
     };
-  }, [open]);
+  }, [open, closePanel]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -43,7 +60,7 @@ export default function SettingsPanel({
         type="button"
         aria-label="Game settings"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? closePanel() : setOpen(true))}
         className={`flex size-10 cursor-pointer items-center justify-center rounded-full border outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-accent ${
           open
             ? "border-line-strong bg-surface-2 text-ink"
@@ -64,7 +81,7 @@ export default function SettingsPanel({
             <button
               type="button"
               aria-label="Close settings"
-              onClick={() => setOpen(false)}
+              onClick={closePanel}
               className="-m-1.5 cursor-pointer rounded p-1.5 text-faint outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
             >
               <X size={14} aria-hidden />
@@ -112,6 +129,38 @@ export default function SettingsPanel({
                 );
               })}
             </div>
+          </div>
+
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-faint">
+              Reset
+            </p>
+            <p className="mt-1 text-xs text-dim">
+              Clears your stats, streak, tier progress and settings from this
+              device. Can&apos;t be undone.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirming) {
+                  setConfirming(true);
+                  return;
+                }
+                closePanel();
+                onReset();
+              }}
+              className={`mt-2.5 flex min-h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-bad ${
+                confirming
+                  ? "border-bad bg-bad/15 font-medium text-bad"
+                  : "border-line text-dim hover:border-bad/50 hover:text-bad"
+              }`}
+            >
+              <ArrowCounterClockwise size={15} aria-hidden />
+              {confirming ? "Tap again to erase everything" : "Reset all data"}
+            </button>
+            <span aria-live="polite" className="sr-only">
+              {confirming ? "Confirm reset: press the button again to erase all data." : ""}
+            </span>
           </div>
         </div>
       )}

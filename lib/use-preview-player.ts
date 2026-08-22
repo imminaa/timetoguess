@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  */
 
 const VOLUME_KEY = "guessable:volume";
+export const DEFAULT_VOLUME = 0.8;
 
 declare global {
   interface Navigator {
@@ -66,9 +67,9 @@ export function usePreviewPlayer(): PreviewPlayer {
   const [clipSeconds, setClipSeconds] = useState(0);
   const [ready, setReady] = useState(false);
   const [volume, setVolumeState] = useState(() => {
-    if (typeof window === "undefined") return 0.8;
+    if (typeof window === "undefined") return DEFAULT_VOLUME;
     const stored = Number.parseFloat(localStorage.getItem(VOLUME_KEY) ?? "");
-    return Number.isFinite(stored) ? Math.min(Math.max(stored, 0), 1) : 0.8;
+    return Number.isFinite(stored) ? Math.min(Math.max(stored, 0), 1) : DEFAULT_VOLUME;
   });
   const volumeRef = useRef(volume);
 
