@@ -4,6 +4,9 @@
 
 export const STAGES = [0.01, 0.1, 0.5, 2, 8, 15] as const;
 
+/** Stages that are off until you turn them on. 0.01s is a joke, not a game. */
+export const DEFAULT_DISABLED_STAGES: readonly number[] = [0.01];
+
 export type Difficulty = "easy" | "medium" | "hard" | "expert" | "impossible";
 
 export interface DifficultyMeta {

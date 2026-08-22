@@ -12,6 +12,7 @@ import TierLadder from "@/components/TierLadder";
 import { STAGES, difficultyMeta, type Difficulty } from "@/lib/game-config";
 import { applyResult, jumpTo, type Progress } from "@/lib/progression";
 import {
+  defaultSettings,
   loadProgress,
   loadSettings,
   saveProgress,
@@ -57,7 +58,8 @@ export default function Game({ ready }: { ready: boolean }) {
   // Until first mutation, fall through to localStorage (client only).
   const stats = statsState ?? (isClient ? loadStats() : null);
   const progress = progressState ?? (isClient ? loadProgress() : null);
-  const enabledStages = stagesState ?? (isClient ? loadSettings().enabledStages : [...STAGES]);
+  const enabledStages =
+    stagesState ?? (isClient ? loadSettings() : defaultSettings()).enabledStages;
 
   const stages = enabledStages;
   const clampIndex = useCallback(

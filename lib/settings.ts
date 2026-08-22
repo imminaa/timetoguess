@@ -1,6 +1,6 @@
 "use client";
 
-import { STAGES } from "@/lib/game-config";
+import { DEFAULT_DISABLED_STAGES, STAGES } from "@/lib/game-config";
 
 const SETTINGS_KEY = "guessable:settings:v1";
 const PROGRESS_KEY = "guessable:progress:v1";
@@ -14,7 +14,9 @@ export interface Settings {
 }
 
 export function defaultSettings(): Settings {
-  return { enabledStages: [...STAGES] };
+  return {
+    enabledStages: STAGES.filter((s) => !DEFAULT_DISABLED_STAGES.includes(s)),
+  };
 }
 
 export function loadSettings(): Settings {
