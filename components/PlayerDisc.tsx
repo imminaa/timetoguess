@@ -46,7 +46,7 @@ export default function PlayerDisc({
         }`}
         style={{
           background:
-            "repeating-radial-gradient(circle at 50%, #2a1416 0px, #2a1416 2px, #160a0b 3px, #160a0b 5px)",
+            "repeating-radial-gradient(circle at 50%, #211c16 0px, #211c16 2px, #120f0c 3px, #120f0c 5px)",
         }}
       >
         <div className="absolute left-1/2 top-1/2 size-[38%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-accent to-accent-strong" />
