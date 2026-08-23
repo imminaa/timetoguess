@@ -53,21 +53,73 @@ popularity measure that spans decades. Apple Music does not provide one:
 So popularity is assembled from two halves:
 
 - **Membership** — `lib/canon.ts` builds an all-era candidate set from Apple's
-  editorial *Essentials* series (one per decade from the '50s on, plus the big
-  genre cuts), the daily *Top 100: Global* chart, and your own storefront's
-  chart for local-language hits. ~1400 songs, 1950s → today.
-- **Ranking** — `lib/popularity.ts` scores those songs by Last.fm global
-  listener counts, the one number that is comparable across artists and eras.
-  Tier bands are **quantiles of what has actually been measured**, not
-  hardcoded play counts, so they do not rot as absolute counts inflate.
+  editorial *Essentials* series (one per decade from the '50s on, plus genre
+  cuts and a per-artist playlist for the best-represented artists), the daily
+  *Top 100* of ~20 markets, and the per-genre charts. Each song records how
+  many independent sources vouch for it, which is the one popularity signal
+  here that does not come from Last.fm.
+- **Ranking** — `lib/popularity.ts` combines four weak signals, because each
+  is wrong alone: cohort-relative listeners (so a 2024 hit is not punished for
+  having had two years to accumulate scrobbles instead of forty), source
+  multiplicity, plays-per-listener (broad reach vs. a small devoted audience),
+  and the song's rank within its own artist's catalog.
+
+Each decade's reference point is the **85th percentile of its well-vouched-for
+songs**, not the median of everything in it. The canon's tail differs sharply by
+era — the 1960s arrive via curated Essentials playlists, the 2020s via twenty
+country charts carrying a lot of filler — and taking the middle of each let the
+2020s baseline collapse to filler level, handing every real recent hit a ratio
+up to 168x and 46% of the Easy tier.
+
+Two details do most of the work:
+
+- Last.fm is queried **per artist**, not per song. `artist.getTopTracks`
+  returns 50 tracks with their listener counts in one request, so the whole
+  canon costs about what a few-hundred-song sample used to.
+- Lookups use the catalog's **unsplit** artist name. Last.fm's `autocorrect`
+  never reports a miss — ask it for "Earth" instead of "Earth, Wind & Fire"
+  and it returns a different song called *September* with 1,215 listeners
+  rather than 2,171,206. `lib/lastfm.ts` rejects an answer that lands
+  implausibly far above the artist's own catalog.
+
+Tier bands are **quantiles**, and the listener floors that sit on top of them
+are multiples of the canon's own median — never hardcoded play counts — so
+neither rots as absolute counts inflate. The floors are what stop cohort
+normalization from promoting a mid-tier recent single into "songs everybody
+knows".
 
 Apple's per-artist `top-songs` view *is* an all-time play ranking, and it is
-what the Hard and Expert tiers use once a famous artist is picked — but it
-only ranks within one artist, so it cannot separate Queen from a one-hit
-wonder. That is the gap Last.fm fills.
+where the Hard and Expert tiers get their playable candidates once a famous
+artist is picked — but it only ranks within one artist, so it cannot separate
+Queen from a one-hit wonder. That is the gap Last.fm fills.
 
-Run `npm run check-popularity` to see which canon sources resolved, the
-listener distribution, and what each tier band is drawing from.
+### Building the snapshot
+
+Scoring the whole canon takes minutes and a few thousand API calls, so it is
+done ahead of time and committed as `data/canon.json`:
+
+```bash
+npm run build-canon               # full rebuild, ~20 minutes
+npm run build-canon -- --rescore  # re-rank what is already there, instantly
+```
+
+Requests are paced to Last.fm's documented ~5/second, which is what the build
+time buys: running unpaced returned 429s that were silently miscounted as songs
+nobody had heard of. Override with `LASTFM_MIN_REQUEST_GAP_MS` if your key
+allows more. The build fails loudly if any song is lost to an API error rather
+than to genuine obscurity.
+
+Because each song's raw measurement is stored next to its score, changing the
+*ranking* never needs a refetch — `--rescore` re-ranks the existing snapshot in
+seconds.
+
+Without a snapshot the game still runs — it scores a live sample on first use
+— but the tiers draw from far fewer songs. Rebuild it when it goes stale
+(`npm run check-popularity` reports its age).
+
+Run `npm run check-popularity` to see the listener distribution, what each
+tier is drawing from, and whether the widely-known benchmark songs
+(`lib/canon-benchmark.ts`) actually landed in Easy.
 
 ## How it works
 
@@ -85,9 +137,10 @@ listener distribution, and what each tier band is drawing from.
 ## Development
 
 ```bash
-npm test                 # unit tests (normalization, tokens, progression, stage scale)
+npm test                 # unit tests (scoring, popularity guard, pools, normalization)
+npm run build-canon      # rebuild data/canon.json (slow; needs both API keys)
 npm run sample-pools     # print sample songs per difficulty tier
-npm run check-popularity # canon sources, listener distribution, tier bands
+npm run check-popularity # listener distribution, tier bands, benchmark placement
 npm run check-apple      # diagnose Apple developer-token auth
 npm run build            # production build
 ```

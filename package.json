@@ -10,7 +10,8 @@
     "test": "vitest run",
     "sample-pools": "tsx --tsconfig tsconfig.json scripts/sample-pools.ts",
     "check-apple": "tsx --tsconfig tsconfig.json scripts/check-apple-auth.ts",
-    "check-popularity": "tsx --tsconfig tsconfig.json scripts/check-popularity.ts"
+    "check-popularity": "tsx --tsconfig tsconfig.json scripts/check-popularity.ts",
+    "build-canon": "tsx --tsconfig tsconfig.json scripts/build-canon.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

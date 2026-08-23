@@ -1,26 +1,30 @@
 import type { AppleSong } from "@/lib/apple";
-import { canonSongs } from "@/lib/canon";
-import { mapAtLookupRate, trackPopularity } from "@/lib/lastfm";
+import { canonEntries, type CanonEntry, type CanonOptions } from "@/lib/canon";
+import { loadSnapshot, type ScoredSong } from "@/lib/canon-snapshot";
+import { artistCatalog, mapAtLookupRate, songPopularity } from "@/lib/lastfm";
 
 /**
  * How famous each canon song is, on one scale that spans artists and decades.
  *
- * Tier boundaries are quantiles of what has actually been measured rather than
- * hardcoded playcount numbers: Last.fm's absolute counts climb every year and
- * skew heavily by genre, so "the top fifth of the canon" stays meaningful where
- * "over five million plays" would quietly rot.
+ * Ranking is deliberately not "listeners, descending". Four weak signals are
+ * combined because each one is wrong on its own:
+ *
+ *  - cohort-relative listeners, so a 2024 hit is not punished for having had
+ *    two years to accumulate scrobbles instead of forty;
+ *  - how many independent canon sources vouch for the song, the only signal
+ *    here that does not come from Last.fm at all;
+ *  - plays-per-listener, which separates a song with broad casual reach from
+ *    a cult favourite with a small devoted audience;
+ *  - the song's rank within its own artist's catalog, which is Apple's
+ *    all-time play ordering rather than a scrobble count.
+ *
+ * Tier boundaries are quantiles and the floors are multiples of the canon's
+ * own median, never hardcoded playcounts: Last.fm's absolute counts climb
+ * every year and skew heavily by genre, so "the top tenth of the canon" stays
+ * meaningful where "over five million plays" would quietly rot.
  */
 
-export interface ScoredSong {
-  song: AppleSong;
-  /** Distinct Last.fm listeners. */
-  listeners: number;
-  plays: number;
-  /** Decade the song belongs to, e.g. "1980". */
-  cohort: string;
-  /** Listeners relative to the median of its own decade — the ranking key. */
-  score: number;
-}
+export type { ScoredSong };
 
 /** Raw measurement, before it can be scored against its cohort. */
 interface Measured {
@@ -28,68 +32,146 @@ interface Measured {
   listeners: number;
   plays: number;
   cohort: string;
+  sources: number;
+  artistRank: number | null;
 }
 
-/** Quantile of the canon, most-listened first, that each tier draws from. */
-export const BANDS = {
-  easy: [0, 0.2],
-  medium: [0.2, 0.5],
+/** Quantile of the canon, best-known first, that each tier draws from. */
+export const TIER_BANDS = {
+  easy: [0, 0.1],
+  medium: [0.1, 0.35],
+  impossible: [0.7, 1],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /**
- * Songs scored before the quantiles are trusted. The canon is shuffled before
- * scoring, so this is a random sample of it and a few hundred is plenty to
- * place the boundaries; scoring all ~1500 up front would cost a five-minute
- * first round for no extra accuracy.
+ * Minimum listeners for a tier, as a multiple of the canon's median.
+ *
+ * This is what stops cohort normalization from promoting the wrong songs. A
+ * mid-tier recent single divided by a thin 2020s median produced a score of
+ * 5.59x and landed in "the songs everybody knows" on 414k listeners, above
+ * Take On Me on 2.9M. A floor expressed against the canon's own median is
+ * absolute in effect without rotting as scrobble counts inflate.
  */
-const MIN_SCORED = 250;
-const BLOCK = 125;
+export const TIER_FLOORS = {
+  easy: 1.5,
+  medium: 0.6,
+  hard: 0.35,
+  expert: 0.08,
+  impossible: 0,
+} as const;
+
+/** Weight of a doubling of source count. 1 source 1.00x, 4 sources ~1.70x. */
+const MULTIPLICITY_WEIGHT = 0.35;
+/** How far plays-per-listener may move a score either way. */
+const BREADTH_RANGE = [0.75, 1.35] as const;
+/** Bonus for being at the top of the artist's own all-time ranking. */
+const RANK_BONUS = 0.2;
+const RANK_DECAY = 5;
 
 /**
- * Last.fm counts accumulate for as long as a song has existed, so a brand-new
- * release is structurally penalised: measured live, today's Top 100: Global has
- * a median of ~219k listeners against ~1.0M for 2000s and 2010s hits — a 4.6x
- * handicap for being new, enough to file this week's number one under "hard".
- *
- * Ranking each song against the median of its own decade removes that. The
- * 1980s–2010s medians sit within 1.4x of each other, so their relative order
- * barely moves; it is the recent cohort that gets lifted to where it belongs.
+ * Pulls a thin decade's baseline toward the overall median in proportion to
+ * how little of it was measured. The old rule was a cliff — a cohort with 8+
+ * samples used its own median, otherwise the global one — which meant the
+ * 1950s either had every song crushed by a global median built from far
+ * bigger modern cohorts, or, once past the threshold, every song inflated by
+ * its own small one. Neither produced a usable easy tier: the band contained
+ * zero 1950s songs against 58 in the canon.
  */
+const SHRINK_K = 25;
+
+/**
+ * Which point of a decade's distribution counts as "a well-known song of that
+ * era". Not the median: the canon's tail composition differs wildly by decade
+ * — the 1960s arrive via curated Essentials playlists, the 2020s via twenty
+ * country charts carrying a great deal of filler. Taking the middle of each
+ * made the 2020s baseline collapse to filler level, which handed every real
+ * recent hit a ratio of up to 168x and gave that one decade 46% of the easy
+ * tier. A high quantile is stable against however much tail a decade has.
+ */
+const COHORT_QUANTILE = 0.85;
+
+/**
+ * Songs needed to *define* a baseline (they are all still ranked against it).
+ * A track on exactly one country chart is weak evidence of what an era's
+ * well-known songs look like; two independent sources is the canon actually
+ * vouching for it.
+ */
+const BASELINE_MIN_SOURCES = 2;
+
+/**
+ * Songs scored before the quantiles are trusted, when running without a
+ * prebuilt snapshot. Lookups are batched per artist now, so this covers far
+ * more of the canon per request than the old per-song cap did — but a cold
+ * request path still should not score thousands. Build the snapshot instead:
+ *   npm run build-canon
+ */
+const MIN_SCORED = 600;
+const BLOCK = 300;
+
 function cohortOf(song: AppleSong): string {
   return song.year ? String(Math.floor(song.year / 10) * 10) : "unknown";
 }
 
-/** Below this a decade has too few samples to trust its own median. */
-const MIN_COHORT = 8;
-
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-let queue: AppleSong[] | null = null;
-const measured: Measured[] = [];
-let ranked: ScoredSong[] = [];
-let rankedAt = -1;
+function quantile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+}
+
+/** Geometric blend of a cohort's own reference point and the overall one. */
+function shrunkBaseline(values: number[], overall: number): number {
+  const own = quantile(values, COHORT_QUANTILE);
+  if (own <= 0) return overall;
+  const w = values.length / (values.length + SHRINK_K);
+  return Math.exp(w * Math.log(own) + (1 - w) * Math.log(overall));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 /** Score every measurement against its decade, most-famous-for-its-era first. */
-function rank(): ScoredSong[] {
-  if (rankedAt === measured.length) return ranked;
+export function rankMeasurements(measured: readonly Measured[]): ScoredSong[] {
+  if (measured.length === 0) return [];
+  // Only well-vouched-for songs define the baselines; every song is scored
+  // against them. Falling back to the whole set keeps a canon with no
+  // multi-source songs (a small live build) from dividing by zero.
+  const defining = measured.filter((m) => m.sources >= BASELINE_MIN_SOURCES);
+  const reference = defining.length > 0 ? defining : measured;
   const byCohort = new Map<string, number[]>();
-  for (const m of measured) {
-    byCohort.set(m.cohort, [...(byCohort.get(m.cohort) ?? []), m.listeners]);
+  for (const m of reference) {
+    const bucket = byCohort.get(m.cohort);
+    if (bucket) bucket.push(m.listeners);
+    else byCohort.set(m.cohort, [m.listeners]);
   }
-  const overall = median(measured.map((m) => m.listeners)) || 1;
+  const overall = quantile(reference.map((m) => m.listeners), COHORT_QUANTILE) || 1;
   const baseline = new Map<string, number>();
   for (const [key, listeners] of byCohort) {
-    baseline.set(key, listeners.length >= MIN_COHORT ? median(listeners) || overall : overall);
+    baseline.set(key, shrunkBaseline(listeners, overall) || overall);
   }
-  ranked = measured
-    .map((m) => ({ ...m, score: m.listeners / (baseline.get(m.cohort) ?? overall) }))
+  // Plays-per-listener has no meaningful absolute scale, only a relative one.
+  const medianRatio =
+    median(measured.filter((m) => m.listeners > 0).map((m) => m.plays / m.listeners)) || 1;
+
+  return measured
+    .map((m) => {
+      const cohortRatio = m.listeners / (baseline.get(m.cohort) ?? overall);
+      const multiplicity = 1 + MULTIPLICITY_WEIGHT * Math.log2(Math.max(1, m.sources));
+      const ratio = m.listeners > 0 ? m.plays / m.listeners : medianRatio;
+      // A low ratio means many people heard it once: broad reach, not devotion.
+      const breadth = clamp(medianRatio / (ratio || medianRatio), ...BREADTH_RANGE);
+      const rank =
+        m.artistRank === null ? 1 : 1 + RANK_BONUS * Math.exp(-(m.artistRank - 1) / RANK_DECAY);
+      return { ...m, score: cohortRatio * multiplicity * breadth * rank };
+    })
     .sort((a, b) => b.score - a.score || b.listeners - a.listeners);
-  rankedAt = measured.length;
-  return ranked;
 }
 
 function shuffle<T>(items: readonly T[]): T[] {
@@ -101,50 +183,178 @@ function shuffle<T>(items: readonly T[]): T[] {
   return out;
 }
 
+/** Measure one canon entry. Null when its popularity cannot be established. */
+export async function measureEntry(entry: CanonEntry): Promise<Measured | null> {
+  // The unsplit catalog name: Last.fm files September under "Earth, Wind &
+  // Fire" and hands back a 1,215-listener stranger for "Earth". The split lead
+  // artist goes along as an alternate, because a collaboration credit like
+  // "Daft Punk, Pharrell Williams & Nile Rodgers" is its own near-empty
+  // Last.fm page while the song really lives under "Daft Punk".
+  const found = await songPopularity(entry.song.primaryArtist, entry.song.title, [
+    entry.song.artists[0] ?? "",
+  ]);
+  if (!found || !found.confident) return null;
+  return {
+    song: entry.song,
+    listeners: found.listeners,
+    plays: found.plays,
+    artistRank: found.artistRank,
+    cohort: cohortOf(entry.song),
+    sources: entry.sources,
+  };
+}
+
+export interface ScoreReport {
+  songs: ScoredSong[];
+  /** Songs Last.fm genuinely could not place. */
+  missing: number;
+  /** Songs lost to an API failure — a build problem, not obscurity. */
+  failed: number;
+  /** One example failure, for the build log. */
+  firstError: string | null;
+}
+
+/** Score an entire canon. Used by the snapshot build; reports progress. */
+export async function scoreCanon(
+  entries: readonly CanonEntry[],
+  onProgress?: (done: number, total: number) => void
+): Promise<ScoreReport> {
+  const measured: Measured[] = [];
+  let missing = 0;
+  let failed = 0;
+  let firstError: string | null = null;
+  let done = 0;
+  // Grouping by artist means the per-artist catalog request is made once and
+  // every other song by that artist is answered from cache.
+  const byArtist = new Map<string, CanonEntry[]>();
+  for (const entry of entries) {
+    const key = entry.song.primaryArtist.toLowerCase();
+    const bucket = byArtist.get(key);
+    if (bucket) bucket.push(entry);
+    else byArtist.set(key, [entry]);
+  }
+  await mapAtLookupRate([...byArtist.values()], async (group) => {
+    for (const entry of group) {
+      try {
+        const m = await measureEntry(entry);
+        if (m) measured.push(m);
+        else missing++;
+      } catch (err) {
+        // One artist's outage must not abort a build of thousands — but it
+        // must not be mistaken for the song being obscure either.
+        failed++;
+        firstError ??= err instanceof Error ? err.message : String(err);
+      }
+      onProgress?.(++done, entries.length);
+    }
+  });
+  return { songs: rankMeasurements(measured), missing, failed, firstError };
+}
+
+let live: { queue: CanonEntry[]; measured: Measured[] } | null = null;
+let ranked: ScoredSong[] | null = null;
+
 /** Score another slice of the canon. False once the canon is used up. */
 async function scoreBlock(): Promise<boolean> {
-  if (!queue) queue = shuffle(await canonSongs());
-  const batch = queue.splice(0, BLOCK);
+  if (!live) live = { queue: shuffle(await canonEntries()), measured: [] };
+  const batch = live.queue.splice(0, BLOCK);
   if (batch.length === 0) return false;
-  const results = await mapAtLookupRate(batch, async (song) => {
-    // Last.fm files collaborations under the lead artist, which is Apple's first.
-    const found = await trackPopularity(song.artists[0] ?? "", song.title);
-    return found ? { song, ...found, cohort: cohortOf(song) } : null;
-  });
-  // Songs Last.fm has never seen are not "popular" by any reading — drop them.
-  measured.push(...results.filter((r): r is Measured => r !== null));
+  const results = await mapAtLookupRate(batch, (entry) =>
+    measureEntry(entry).catch(() => null)
+  );
+  live.measured.push(...results.filter((r): r is Measured => r !== null));
+  ranked = null;
   return true;
 }
 
-async function ensureScored(min: number): Promise<void> {
-  while (measured.length < min) {
+/**
+ * The ranked canon. Served from the prebuilt snapshot when there is one, which
+ * is the supported configuration; otherwise scored live on first use.
+ */
+export async function rankedCanon(): Promise<ScoredSong[]> {
+  if (ranked) return ranked;
+  const snapshot = loadSnapshot();
+  if (snapshot) {
+    ranked = snapshot.songs;
+    return ranked;
+  }
+  while ((live?.measured.length ?? 0) < MIN_SCORED) {
     if (!(await scoreBlock())) break;
   }
-  if (measured.length === 0) {
+  if (!live || live.measured.length === 0) {
     throw new Error(
-      "Last.fm returned no popularity data for any canon song. Check LASTFM_API_KEY."
+      "Last.fm returned no usable popularity data for any canon song. Check LASTFM_API_KEY."
     );
   }
+  ranked = rankMeasurements(live.measured);
+  return ranked;
 }
 
-/** Everything scored so far, best-known first. Exported for the calibration script. */
-export async function popularitySnapshot(min = MIN_SCORED): Promise<ScoredSong[]> {
-  await ensureScored(min);
-  return [...rank()];
+/** Median listeners across the ranked canon — the basis for every tier floor. */
+export async function medianListeners(): Promise<number> {
+  const all = await rankedCanon();
+  return median(all.map((s) => s.listeners)) || 1;
 }
 
-/** A random sample of canon songs whose popularity falls inside `band`. */
-export async function sampleBand(
-  band: readonly [number, number],
-  want: number
-): Promise<AppleSong[]> {
-  await ensureScored(MIN_SCORED);
-  const all = rank();
+/** The absolute listener floor a song must clear to be served at this tier. */
+export async function listenerFloor(tier: keyof typeof TIER_FLOORS): Promise<number> {
+  return TIER_FLOORS[tier] * (await medianListeners());
+}
+
+/** Everything scored, best-known first. Exported for the calibration script. */
+export async function popularitySnapshot(): Promise<ScoredSong[]> {
+  return [...(await rankedCanon())];
+}
+
+/** The songs of a tier's quantile band that also clear its listener floor. */
+export async function tierSongs(tier: keyof typeof TIER_BANDS): Promise<ScoredSong[]> {
+  const all = await rankedCanon();
+  const band = TIER_BANDS[tier];
+  const floor = await listenerFloor(tier);
   const from = Math.floor(all.length * band[0]);
   const to = Math.max(from + 1, Math.ceil(all.length * band[1]));
-  return shuffle(all.slice(from, to))
+  return all.slice(from, to).filter((s) => s.listeners >= floor);
+}
+
+/** A random sample of the tier's songs. */
+export async function sampleTier(
+  tier: keyof typeof TIER_BANDS,
+  want: number
+): Promise<AppleSong[]> {
+  return shuffle(await tierSongs(tier))
     .slice(0, want)
     .map((s) => s.song);
+}
+
+/** Minimum tracks over the hard floor before an artist counts as deep enough. */
+const DEEP_CATALOG_TRACKS = 8;
+
+/**
+ * True when the artist has enough well-known material for a "fan favourite"
+ * round to be fair. Without this the hard tier picks a one-hit act, takes the
+ * songs *after* their one hit, and asks you to name something nobody has heard.
+ */
+export async function hasDeepCatalog(artist: string, floor: number): Promise<boolean> {
+  const catalog = await artistCatalog(artist);
+  let deep = 0;
+  for (const track of catalog.tracks.values()) {
+    if (track.listeners >= floor && ++deep >= DEEP_CATALOG_TRACKS) return true;
+  }
+  return false;
+}
+
+/**
+ * The artist's own tracks ranked by listeners, best-known first. This is the
+ * ordering the hard tier needs: Apple's top-songs view stops at 25 and mixes
+ * in re-releases, and its rank 6 for a one-hit act is not a fan favourite.
+ */
+export async function artistRanking(
+  artist: string
+): Promise<{ title: string; listeners: number }[]> {
+  const catalog = await artistCatalog(artist);
+  return [...catalog.tracks.entries()]
+    .map(([title, stat]) => ({ title, listeners: stat.listeners }))
+    .sort((a, b) => b.listeners - a.listeners);
 }
 
 /**
@@ -153,5 +363,13 @@ export async function sampleBand(
  * handful of megastars from owning every hard round.
  */
 export async function famousSongs(count: number): Promise<AppleSong[]> {
-  return sampleBand(BANDS.easy, count);
+  return sampleTier("easy", count);
 }
+
+/** Rebuild from a freshly written snapshot without restarting the process. */
+export function resetPopularityCache(): void {
+  live = null;
+  ranked = null;
+}
+
+export type { CanonOptions };
