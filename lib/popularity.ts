@@ -2,6 +2,7 @@ import type { AppleSong } from "@/lib/apple";
 import { canonEntries, type CanonEntry, type CanonOptions } from "@/lib/canon";
 import { loadSnapshot, type ScoredSong } from "@/lib/canon-snapshot";
 import { artistCatalog, mapAtLookupRate, songPopularity } from "@/lib/lastfm";
+import { matchesFilter, NO_FILTER, type CatalogFilter } from "@/lib/music-taxonomy";
 
 /**
  * How famous each canon song is, on one scale that spans artists and decades.
@@ -306,24 +307,57 @@ export async function popularitySnapshot(): Promise<ScoredSong[]> {
   return [...(await rankedCanon())];
 }
 
-/** The songs of a tier's quantile band that also clear its listener floor. */
-export async function tierSongs(tier: keyof typeof TIER_BANDS): Promise<ScoredSong[]> {
+/**
+ * The songs of a tier's quantile band that also clear its listener floor.
+ *
+ * A genre/decade filter narrows the band *after* it is cut, never before.
+ * Ranking the filtered subset instead would redefine every tier: the top tenth
+ * of jazz alone is not "the songs everybody knows", it is the songs a jazz
+ * listener knows, and easy would quietly become hard for any narrow pick. The
+ * cost is that a thin filter can empty a tier outright — which the caller is
+ * expected to report rather than paper over.
+ */
+export async function tierSongs(
+  tier: keyof typeof TIER_BANDS,
+  filter: CatalogFilter = NO_FILTER
+): Promise<ScoredSong[]> {
   const all = await rankedCanon();
   const band = TIER_BANDS[tier];
   const floor = await listenerFloor(tier);
   const from = Math.floor(all.length * band[0]);
   const to = Math.max(from + 1, Math.ceil(all.length * band[1]));
-  return all.slice(from, to).filter((s) => s.listeners >= floor);
+  return all
+    .slice(from, to)
+    .filter((s) => s.listeners >= floor && matchesFilter(s.song, filter));
 }
 
 /** A random sample of the tier's songs. */
 export async function sampleTier(
   tier: keyof typeof TIER_BANDS,
-  want: number
+  want: number,
+  filter: CatalogFilter = NO_FILTER
 ): Promise<AppleSong[]> {
-  return shuffle(await tierSongs(tier))
+  return shuffle(await tierSongs(tier, filter))
     .slice(0, want)
     .map((s) => s.song);
+}
+
+/**
+ * How many canon songs each directly-drawn tier has under a filter.
+ *
+ * `/api/catalog` serves this so the settings panel can show the damage before
+ * a player starts a round they cannot finish. The artist-driven tiers are
+ * absent on purpose: they pick their artist out of the easy band, so `easy`
+ * being non-zero is exactly the condition for hard and expert to work too.
+ */
+export async function tierCounts(
+  filter: CatalogFilter
+): Promise<Record<keyof typeof TIER_BANDS, number>> {
+  const tiers = Object.keys(TIER_BANDS) as (keyof typeof TIER_BANDS)[];
+  const counts = await Promise.all(
+    tiers.map(async (tier) => [tier, (await tierSongs(tier, filter)).length] as const)
+  );
+  return Object.fromEntries(counts) as Record<keyof typeof TIER_BANDS, number>;
 }
 
 /** Minimum tracks over the hard floor before an artist counts as deep enough. */
@@ -362,8 +396,11 @@ export async function artistRanking(
  * tiers. Sampling the top band rather than the literal top N keeps the same
  * handful of megastars from owning every hard round.
  */
-export async function famousSongs(count: number): Promise<AppleSong[]> {
-  return sampleTier("easy", count);
+export async function famousSongs(
+  count: number,
+  filter: CatalogFilter = NO_FILTER
+): Promise<AppleSong[]> {
+  return sampleTier("easy", count, filter);
 }
 
 /** Rebuild from a freshly written snapshot without restarting the process. */

@@ -8,6 +8,8 @@ interface Props {
   progress: number;
   disabled?: boolean;
   onToggle: () => void;
+  /** Override the sizing classes — a denser board may want a smaller disc. */
+  size?: string;
 }
 
 /**
@@ -19,10 +21,16 @@ interface Props {
  */
 export const DISC_SIZE = "size-[min(13rem,52vw,34dvh)] sm:size-[min(15rem,40dvh)]";
 
-export default function PlayerDisc({ isPlaying, progress, disabled, onToggle }: Props) {
+export default function PlayerDisc({
+  isPlaying,
+  progress,
+  disabled,
+  onToggle,
+  size = DISC_SIZE,
+}: Props) {
   const angle = progress * 360;
   return (
-    <div className={`relative mx-auto ${DISC_SIZE}`}>
+    <div className={`relative mx-auto ${size}`}>
       <div
         aria-hidden
         className="absolute inset-0 rounded-full"

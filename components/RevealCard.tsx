@@ -13,14 +13,10 @@ import {
 import Image from "next/image";
 import type { Stats } from "@/lib/stats";
 import type { PublicAnswer } from "@/lib/types";
+import type { RoundResult, TierChange } from "@/lib/use-game-engine";
 import type { PreviewPlayer } from "@/lib/use-preview-player";
 
-export type RoundResult = "won" | "lost" | "gaveup";
-
-export interface TierChange {
-  kind: "promoted" | "demoted";
-  tierLabel: string;
-}
+export type { RoundResult, TierChange };
 
 interface Props {
   answer: PublicAnswer;

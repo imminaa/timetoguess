@@ -2,7 +2,7 @@
 
 import { CircleNotch, MagnifyingGlass, MusicNote } from "@phosphor-icons/react";
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { GUESS_INPUT_PROPS, useGuessSearch } from "@/lib/use-guess-search";
 import type { SearchResult } from "@/lib/types";
 
 interface Props {
@@ -13,110 +13,24 @@ interface Props {
 }
 
 export default function GuessSearch({ onGuess, disabled, shakeSignal }: Props) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [listMaxHeight, setListMaxHeight] = useState(288);
-  const abortRef = useRef<AbortController | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listId = "guess-search-listbox";
-
-  useEffect(() => {
-    if (!shakeSignal) return;
-    // Retrigger the CSS animation without a render: drop the class, force a
-    // reflow, re-add it.
-    const el = wrapRef.current;
-    if (!el) return;
-    el.classList.remove("animate-shake");
-    void el.offsetWidth;
-    el.classList.add("animate-shake");
-    const t = setTimeout(() => el.classList.remove("animate-shake"), 500);
-    return () => clearTimeout(t);
-  }, [shakeSignal]);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) return;
-    const t = setTimeout(async () => {
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
-          signal: ac.signal,
-        });
-        const data = (await res.json()) as { results?: SearchResult[] };
-        setResults(data.results ?? []);
-        setHighlight(0);
-        setOpen(true);
-        setLoading(false);
-      } catch {
-        if (!ac.signal.aborted) setLoading(false);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  useEffect(() => {
-    const close = (e: PointerEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, []);
-
-  // The suggestions hang below the input, and on a phone the software keyboard
-  // is sitting right there. iOS doesn't shrink the layout viewport for it, so
-  // a fixed max-height simply renders half the list underneath the keys —
-  // measure the actually-visible area instead.
-  useEffect(() => {
-    if (!open) return;
-    const vv = window.visualViewport;
-    const measure = () => {
-      const rect = inputRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const visibleBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-      const room = visibleBottom - rect.bottom - 16;
-      // Never collapse to nothing: below ~9rem the list scrolls internally.
-      setListMaxHeight(Math.max(144, Math.min(288, room)));
-    };
-    measure();
-    vv?.addEventListener("resize", measure);
-    vv?.addEventListener("scroll", measure);
-    window.addEventListener("resize", measure);
-    return () => {
-      vv?.removeEventListener("resize", measure);
-      vv?.removeEventListener("scroll", measure);
-      window.removeEventListener("resize", measure);
-    };
-  }, [open]);
-
-  const pick = (result: SearchResult) => {
-    setQuery("");
-    setResults([]);
-    setOpen(false);
-    onGuess(result);
-    inputRef.current?.focus();
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!open || results.length === 0) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlight((h) => (h + 1) % results.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlight((h) => (h - 1 + results.length) % results.length);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      pick(results[highlight]);
-    } else if (e.key === "Escape") {
-      setOpen(false);
-    }
-  };
+  // Destructured, not held as one object: the refs travel as their own
+  // bindings so the compiler can tell them apart from the render-time values.
+  const {
+    query,
+    setQuery,
+    results,
+    open,
+    loading,
+    highlight,
+    setHighlight,
+    listMaxHeight,
+    listId,
+    pick,
+    onKeyDown,
+    onFocus,
+    wrapRef,
+    inputRef,
+  } = useGuessSearch({ onGuess, shakeSignal });
 
   return (
     <div ref={wrapRef} className="relative">
@@ -126,36 +40,19 @@ export default function GuessSearch({ onGuess, disabled, shakeSignal }: Props) {
         className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-faint"
       />
       <input
+        {...GUESS_INPUT_PROPS}
         ref={inputRef}
-        type="text"
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
         aria-label="Guess the song"
         placeholder="Know it? Name it…"
-        // Song titles are not sentences: iOS auto-capitalising and
-        // auto-correcting them fights the autocomplete on every keystroke.
-        autoCapitalize="none"
-        autoCorrect="off"
-        autoComplete="off"
-        spellCheck={false}
-        enterKeyHint="search"
         value={query}
         disabled={disabled}
-        onChange={(e) => {
-          const value = e.target.value;
-          setQuery(value);
-          if (value.trim().length < 2) {
-            setResults([]);
-            setOpen(false);
-            setLoading(false);
-          } else {
-            setLoading(true);
-          }
-        }}
+        onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onKeyDown}
-        onFocus={() => results.length > 0 && setOpen(true)}
+        onFocus={onFocus}
         /* text-base is load-bearing: Safari zooms the whole page in when you
            focus an input under 16px, and never zooms back out. */
         className="h-12 w-full rounded-xl border border-line bg-surface pl-11 pr-11 text-base text-ink placeholder:text-faint outline-none transition-colors duration-200 focus:border-accent/60 focus:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"

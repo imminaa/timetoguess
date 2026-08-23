@@ -38,3 +38,14 @@ export type HintPayload =
 export interface HintResponse {
   hint: HintPayload;
 }
+
+/** Canon songs surviving the genre/decade filter, per directly-drawn tier. */
+export interface CatalogCounts {
+  easy: number;
+  medium: number;
+  impossible: number;
+}
+
+export interface CatalogResponse {
+  counts: CatalogCounts;
+}
