@@ -3,6 +3,7 @@ import { hasAppleCreds } from "@/lib/apple";
 import { isDifficulty } from "@/lib/game-config";
 import { availableHints } from "@/lib/hints";
 import { hasLastfmCreds } from "@/lib/lastfm";
+import { filterFromParams } from "@/lib/music-taxonomy";
 import { drawTrack } from "@/lib/pool";
 
 export const dynamic = "force-dynamic";
@@ -11,12 +12,13 @@ export async function GET(req: Request): Promise<Response> {
   if (!hasAppleCreds() || !hasLastfmCreds()) {
     return Response.json({ error: "setup" }, { status: 503 });
   }
-  const difficulty = new URL(req.url).searchParams.get("difficulty") ?? "";
+  const params = new URL(req.url).searchParams;
+  const difficulty = params.get("difficulty") ?? "";
   if (!isDifficulty(difficulty)) {
     return Response.json({ error: "Unknown difficulty" }, { status: 400 });
   }
   try {
-    const { track, previewUrl } = await drawTrack(difficulty);
+    const { track, previewUrl } = await drawTrack(difficulty, filterFromParams(params));
     const token = encryptAnswer({
       trackId: track.id,
       title: track.title,

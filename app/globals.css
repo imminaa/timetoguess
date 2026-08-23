@@ -1,32 +1,32 @@
 @import "tailwindcss";
 
 @theme {
-  /* Surfaces: warm charcoal, like a dim listening room */
-  --color-bg: #141110;
-  --color-surface: #1c1815;
-  --color-surface-2: #262019;
-  --color-line: #332c23;
-  --color-line-strong: #4a4033;
+  /* Surfaces: velvet red, like the inside of a jukebox cabinet */
+  --color-bg: #2a0e10;
+  --color-surface: #3a1517;
+  --color-surface-2: #47191b;
+  --color-line: #5a2220;
+  --color-line-strong: #743029;
 
-  /* Ink: warm off-whites */
-  --color-ink: #f4efe6;
-  --color-dim: #a89d8d;
-  --color-faint: #75695a;
+  /* Ink: warm cream, the colour of an old selector card */
+  --color-ink: #f6ecd8;
+  --color-dim: #c9a99a;
+  --color-faint: #9a756a;
 
-  /* Brand accent: amber, like a VU meter needle-light */
-  --color-accent: #f0aa3d;
-  --color-accent-strong: #e0912b;
+  /* Brand accent: gold, the way a Wurlitzer lights its selector */
+  --color-accent: #f5c542;
+  --color-accent-strong: #e0a927;
 
-  /* Difficulty ramp: heat scale, ending white-hot */
-  --color-tier-easy: #9dc26a;
-  --color-tier-medium: #e3c04d;
-  --color-tier-hard: #ec9241;
-  --color-tier-expert: #e25f4b;
-  --color-tier-impossible: #dbe2ec;
+  /* Difficulty ramp: heat scale, retuned to read against burgundy */
+  --color-tier-easy: #6bbf74;
+  --color-tier-medium: #f5c542;
+  --color-tier-hard: #ee9a3a;
+  --color-tier-expert: #e8635c;
+  --color-tier-impossible: #f6ecd8;
 
   /* Semantic */
-  --color-good: #9dc26a;
-  --color-bad: #e25f4b;
+  --color-good: #6bbf74;
+  --color-bad: #e8635c;
 
   --font-display: var(--font-bricolage);
   --font-sans: var(--font-geist);
@@ -37,6 +37,10 @@
   --animate-pop-in: pop-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-shake: shake 0.4s ease-in-out both;
   --animate-eq: eq 0.9s ease-in-out infinite;
+  --animate-slot-in: slot-in 0.42s cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-hit-pop: hit-pop 0.5s cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-hit-ring: hit-ring 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-overlay-in: overlay-in 0.32s ease-out both;
 }
 
 @keyframes disc-spin {
@@ -86,6 +90,53 @@
   }
 }
 
+@keyframes slot-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The "you got it" hit: a fast overshoot that settles. */
+@keyframes hit-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  55% {
+    transform: scale(1.045);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* A ring that expands and fades — fired once when a round ends. */
+@keyframes hit-ring {
+  from {
+    opacity: 0.55;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes eq {
   0%,
   100% {
@@ -106,13 +157,9 @@ html {
 }
 
 body {
-  /* A faint overhead stage-light wash over the charcoal base */
+  /* The glow off the top of the cabinet, over the velvet base */
   background:
-    radial-gradient(
-      1100px 540px at 50% -12%,
-      color-mix(in srgb, var(--color-accent) 6%, transparent),
-      transparent 70%
-    )
+    radial-gradient(1200px 620px at 50% -10%, #4a1517, transparent 72%)
     var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;

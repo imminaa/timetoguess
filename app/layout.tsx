@@ -96,7 +96,7 @@ export const viewport: Viewport = {
   // Draw into the notch/Dynamic Island and home-indicator area; we inset the
   // content ourselves with env(safe-area-inset-*).
   viewportFit: "cover",
-  themeColor: "#141110",
+  themeColor: "#2a0e10",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

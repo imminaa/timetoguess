@@ -33,12 +33,12 @@ export const OG_IMAGE_ALT = `${SITE_NAME} — ${SITE_TAGLINE}`;
 
 /** Brand colours, mirrored from globals.css so the OG card cannot drift. */
 export const BRAND = {
-  bg: "#141110",
-  surface: "#1c1815",
-  line: "#332c23",
-  ink: "#f4efe6",
-  dim: "#a89d8d",
-  accent: "#f0aa3d",
+  bg: "#2a0e10",
+  surface: "#3a1517",
+  line: "#5a2220",
+  ink: "#f6ecd8",
+  dim: "#c9a99a",
+  accent: "#f5c542",
 } as const;
 
 /**

@@ -7,31 +7,78 @@ const PROGRESS_KEY = "guessable:progress:v1";
 
 import { initialProgress, type Progress } from "@/lib/progression";
 import { isDifficulty } from "@/lib/game-config";
+import {
+  DECADES,
+  GENRE_FAMILIES,
+  isDecade,
+  isGenreFamilyId,
+  normalizeFilter,
+  type CatalogFilter,
+  type GenreFamilyId,
+} from "@/lib/music-taxonomy";
 
 export interface Settings {
   /** Which stage lengths are in play, ascending. Always at least one. */
   enabledStages: number[];
+  /** Genre families that may be drawn from. Always at least one. */
+  genres: GenreFamilyId[];
+  /** Decades that may be drawn from, ascending. Always at least one. */
+  decades: number[];
 }
 
 export function defaultSettings(): Settings {
   return {
     enabledStages: STAGES.filter((s) => !DEFAULT_DISABLED_STAGES.includes(s)),
+    genres: GENRE_FAMILIES.map((f) => f.id),
+    decades: [...DECADES],
   };
 }
 
+/**
+ * Keep only recognized values, and fall back to "everything" for an axis that
+ * ends up empty. An empty list would otherwise be indistinguishable from an
+ * impossible filter, and would leave the player with no way to start a round
+ * except the reset button.
+ */
+function validList<T>(
+  values: unknown,
+  isValid: (v: T) => boolean,
+  fallback: T[],
+  sort?: (a: T, b: T) => number
+): T[] {
+  if (!Array.isArray(values)) return fallback;
+  const kept = [...new Set(values as T[])].filter(isValid);
+  if (kept.length === 0) return fallback;
+  return sort ? kept.sort(sort) : kept;
+}
+
 export function loadSettings(): Settings {
-  if (typeof window === "undefined") return defaultSettings();
+  const defaults = defaultSettings();
+  if (typeof window === "undefined") return defaults;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return defaultSettings();
+    if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<Settings>;
-    const valid = (parsed.enabledStages ?? []).filter((s) =>
-      (STAGES as readonly number[]).includes(s)
-    );
-    return valid.length > 0 ? { enabledStages: valid.sort((a, b) => a - b) } : defaultSettings();
+    return {
+      // Settings saved before the filters existed carry neither key, so each
+      // axis falls back independently rather than discarding the whole record.
+      enabledStages: validList<number>(
+        parsed.enabledStages,
+        (s) => (STAGES as readonly number[]).includes(s),
+        defaults.enabledStages,
+        (a, b) => a - b
+      ),
+      genres: validList<GenreFamilyId>(parsed.genres, isGenreFamilyId, defaults.genres),
+      decades: validList<number>(parsed.decades, isDecade, defaults.decades, (a, b) => a - b),
+    };
   } catch {
-    return defaultSettings();
+    return defaults;
   }
+}
+
+/** The stored selection as a draw restriction — see lib/music-taxonomy.ts. */
+export function settingsFilter(settings: Settings): CatalogFilter {
+  return normalizeFilter({ genres: settings.genres, decades: settings.decades });
 }
 
 export function saveSettings(settings: Settings): void {

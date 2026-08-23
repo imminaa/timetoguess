@@ -22,7 +22,7 @@ export default function OpengraphImage() {
           justifyContent: "space-between",
           padding: 72,
           background: BRAND.bg,
-          // Amber wash off the top-left, echoing the accent in the app.
+          // Gold wash off the top-left, echoing the accent in the app.
           backgroundImage: `radial-gradient(900px 500px at 8% -10%, ${BRAND.accent}26, transparent)`,
           color: BRAND.ink,
           fontFamily: "sans-serif",

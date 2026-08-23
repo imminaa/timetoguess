@@ -8,6 +8,14 @@ import {
 } from "@/lib/apple";
 import type { Difficulty } from "@/lib/game-config";
 import { artistCatalog, mapAtLookupRate, songPopularity } from "@/lib/lastfm";
+import {
+  describeFilter,
+  filterKey,
+  isUnfiltered,
+  matchesFilter,
+  NO_FILTER,
+  type CatalogFilter,
+} from "@/lib/music-taxonomy";
 import { cleanTitle, normalizeArtist, normalizeTitle } from "@/lib/normalize";
 import { famousSongs, hasDeepCatalog, listenerFloor, sampleTier } from "@/lib/popularity";
 
@@ -74,7 +82,44 @@ const ARTIST_ATTEMPTS = 6;
 const FAMOUS_POOL_TTL_MS = 30 * 60 * 1000;
 const FAMOUS_POOL_SIZE = 120;
 
-const pools = new Map<Difficulty, AppleSong[]>();
+/**
+ * How many distinct genre/decade selections keep a warm pool.
+ *
+ * Pools are per server process and shared across everyone hitting it, so the
+ * key space is "however many filter combinations players have picked" rather
+ * than five. Bounded least-recently-used so a handful of households cannot
+ * grow the process without limit; the unfiltered key is just one more entry,
+ * and in a single-filter household nothing is ever evicted.
+ */
+const MAX_POOL_KEYS = 24;
+
+/** Pool identity: a tier under one filter. Unfiltered play keys on the tier. */
+type PoolKey = string;
+
+function poolKey(difficulty: Difficulty, filter: CatalogFilter): PoolKey {
+  const key = filterKey(filter);
+  return key ? `${difficulty}#${key}` : difficulty;
+}
+
+const pools = new Map<PoolKey, AppleSong[]>();
+
+/** Drop the coldest keys once too many filters have been played. */
+function evictColdPools(): void {
+  // Map iterates in insertion order and `touch` reinserts, so the front is
+  // the least recently used.
+  while (pools.size > MAX_POOL_KEYS) {
+    const oldest = pools.keys().next();
+    if (oldest.done) return;
+    pools.delete(oldest.value);
+    served.delete(oldest.value);
+  }
+}
+
+function touch(key: PoolKey, songs: AppleSong[]): void {
+  pools.delete(key);
+  pools.set(key, songs);
+  evictColdPools();
+}
 
 /** Bounded FIFO of ids already served, so a tier can never run itself dry. */
 class RecentlyServed {
@@ -101,13 +146,13 @@ class RecentlyServed {
   }
 }
 
-const served = new Map<Difficulty, RecentlyServed>();
+const served = new Map<PoolKey, RecentlyServed>();
 
-function recent(difficulty: Difficulty): RecentlyServed {
-  const hit = served.get(difficulty);
+function recent(key: PoolKey): RecentlyServed {
+  const hit = served.get(key);
   if (hit) return hit;
   const fresh = new RecentlyServed();
-  served.set(difficulty, fresh);
+  served.set(key, fresh);
   return fresh;
 }
 
@@ -188,15 +233,15 @@ export function selectCandidates(
   return { keep, blockedByRecent };
 }
 
-function addToPool(difficulty: Difficulty, songs: readonly AppleSong[]): Selection {
-  const pool = pools.get(difficulty) ?? [];
-  const servedIds = recent(difficulty);
+function addToPool(key: PoolKey, songs: readonly AppleSong[]): Selection {
+  const pool = pools.get(key) ?? [];
+  const servedIds = recent(key);
   const selection = selectCandidates(songs, {
     isRecent: (id) => servedIds.has(id),
     alreadyPooled: new Set(pool.map(dedupeKey)),
   });
   for (const song of selection.keep) pool.splice(randomInt(0, pool.length), 0, song);
-  pools.set(difficulty, pool);
+  touch(key, pool);
   return selection;
 }
 
@@ -205,7 +250,7 @@ export interface FamousArtist {
   id: string;
 }
 
-let famousPool: { at: number; songs: AppleSong[] } | null = null;
+let famousPool: { key: string; at: number; songs: AppleSong[] } | null = null;
 /** Playlist and chart payloads omit the artist id; resolving it costs a call. */
 const artistIdCache = new Map<string, string | null>();
 
@@ -224,9 +269,17 @@ async function resolveArtistId(song: AppleSong): Promise<string | null> {
  * Nirvana show up alongside this week's names; the catalog-depth gate is what
  * stops a one-hit act being asked for its sixth-best song.
  */
-async function randomFamousArtist(requireDepth: boolean): Promise<FamousArtist | null> {
-  if (!famousPool || Date.now() - famousPool.at > FAMOUS_POOL_TTL_MS) {
-    famousPool = { at: Date.now(), songs: await famousSongs(FAMOUS_POOL_SIZE) };
+async function randomFamousArtist(
+  requireDepth: boolean,
+  filter: CatalogFilter
+): Promise<FamousArtist | null> {
+  // Drawing the artist from the *filtered* easy band is what makes the
+  // artist-driven tiers respect a filter at all: pick Queen for a 1970s-only
+  // game and their deep cuts are 1970s by construction, where picking any
+  // famous artist and then filtering their tracks would mostly draw a blank.
+  const key = filterKey(filter);
+  if (!famousPool || famousPool.key !== key || Date.now() - famousPool.at > FAMOUS_POOL_TTL_MS) {
+    famousPool = { key, at: Date.now(), songs: await famousSongs(FAMOUS_POOL_SIZE, filter) };
   }
   const floor = await listenerFloor("hard");
   for (const song of shuffle(famousPool.songs).slice(0, ARTIST_ATTEMPTS)) {
@@ -294,8 +347,8 @@ async function overFloor(songs: readonly AppleSong[], floor: number): Promise<Ap
 }
 
 /** Album tracks that are not among the artist's best-known songs. */
-async function deepCuts(floor: number): Promise<AppleSong[]> {
-  const artist = await randomFamousArtist(true);
+async function deepCuts(floor: number, filter: CatalogFilter): Promise<AppleSong[]> {
+  const artist = await randomFamousArtist(true, filter);
   if (!artist) return [];
   const [albums, topSongs] = await Promise.all([
     artistAlbums(artist.id),
@@ -304,23 +357,27 @@ async function deepCuts(floor: number): Promise<AppleSong[]> {
   const album = pickRandom(studioAlbums(albums, topSongs));
   if (!album) return [];
   const topKeys = new Set(topSongs.map(dedupeKey));
+  // The artist already cleared the filter; the tracks are checked again
+  // because a long career crosses decades and Apple tags reissues by their own
+  // release date. Over-rejecting here only costs candidates — `topUp` retries
+  // with another artist — while under-rejecting serves a filtered-out song.
   const tracks = (await albumSongs(album.id)).filter(
-    (s) => !topKeys.has(dedupeKey(s)) && isViable(s)
+    (s) => !topKeys.has(dedupeKey(s)) && isViable(s) && matchesFilter(s, filter)
   );
   return overFloor(shuffle(tracks).slice(0, 10), floor);
 }
 
-const generators: Record<Difficulty, () => Promise<AppleSong[]>> = {
-  async easy() {
-    return sampleTier("easy", 25);
+const generators: Record<Difficulty, (filter: CatalogFilter) => Promise<AppleSong[]>> = {
+  async easy(filter) {
+    return sampleTier("easy", 25, filter);
   },
 
-  async medium() {
-    return sampleTier("medium", 25);
+  async medium(filter) {
+    return sampleTier("medium", 25, filter);
   },
 
-  async hard() {
-    const artist = await randomFamousArtist(true);
+  async hard(filter) {
+    const artist = await randomFamousArtist(true, filter);
     if (!artist) return [];
     const ranked = await byListeners(artist.name, await artistTopSongs(artist.id));
     const floor = await listenerFloor("hard");
@@ -328,32 +385,36 @@ const generators: Record<Difficulty, () => Promise<AppleSong[]>> = {
     // fan would name. Apple's own rank 6 was neither, for a one-hit artist.
     return ranked
       .slice(3, 12)
-      .filter((r) => r.listeners >= floor)
+      .filter((r) => r.listeners >= floor && matchesFilter(r.song, filter))
       .map((r) => r.song);
   },
 
-  async expert() {
-    return deepCuts(await listenerFloor("expert"));
+  async expert(filter) {
+    return deepCuts(await listenerFloor("expert"), filter);
   },
 
-  async impossible() {
+  async impossible(filter) {
     // Mostly unfloored deep cuts — real songs by artists you know, which is
     // what makes the reveal land — leavened with the canon's obscure tail.
     if (Math.random() < 0.7) {
-      const cuts = await deepCuts(await listenerFloor("impossible"));
+      const cuts = await deepCuts(await listenerFloor("impossible"), filter);
       if (cuts.length > 0) return cuts;
     }
-    return sampleTier("impossible", 25);
+    return sampleTier("impossible", 25, filter);
   },
 };
 
-async function topUp(difficulty: Difficulty): Promise<void> {
+async function topUp(
+  difficulty: Difficulty,
+  filter: CatalogFilter,
+  key: PoolKey
+): Promise<void> {
   for (let i = 0; i < 4; i++) {
-    if ((pools.get(difficulty)?.length ?? 0) >= POOL_LOW_WATER) return;
+    if ((pools.get(key)?.length ?? 0) >= POOL_LOW_WATER) return;
     try {
-      const songs = shuffle(await generators[difficulty]());
-      const selection = addToPool(difficulty, songs);
-      const starved = (pools.get(difficulty)?.length ?? 0) === 0;
+      const songs = shuffle(await generators[difficulty](filter));
+      const selection = addToPool(key, songs);
+      const starved = (pools.get(key)?.length ?? 0) === 0;
       if (starved && selection.keep.length === 0 && selection.blockedByRecent > 0) {
         // Nothing left to serve and every candidate has been seen recently. A
         // tier with fewer candidates than RECENT_MEMORY would otherwise stall
@@ -362,8 +423,8 @@ async function topUp(difficulty: Difficulty): Promise<void> {
         // The starvation check matters: without it this also fires whenever the
         // pool already holds every unserved candidate, wiping the history early
         // and repeating a track while others were still waiting.
-        recent(difficulty).clear();
-        addToPool(difficulty, songs);
+        recent(key).clear();
+        addToPool(key, songs);
       }
     } catch (err) {
       // Auth/config errors won't fix themselves — surface them to the route
@@ -378,18 +439,36 @@ export interface DrawnTrack {
   previewUrl: string;
 }
 
-/** Pick a random playable track for the difficulty tier. */
-export async function drawTrack(difficulty: Difficulty): Promise<DrawnTrack> {
+/**
+ * Pick a random playable track for the difficulty tier, honouring the filter.
+ *
+ * When a filter is active and the tier comes up empty, the filter is by far
+ * the likeliest cause — Classical has no songs in the easy band at all — so
+ * the error names it. Serving an unfiltered song instead would hand a player
+ * exactly the decade they just excluded, which is the one outcome the setting
+ * exists to prevent.
+ */
+export async function drawTrack(
+  difficulty: Difficulty,
+  filter: CatalogFilter = NO_FILTER
+): Promise<DrawnTrack> {
+  const key = poolKey(difficulty, filter);
   for (let attempt = 0; attempt < MAX_DRAW_ATTEMPTS; attempt++) {
-    let pool = pools.get(difficulty) ?? [];
+    let pool = pools.get(key) ?? [];
     if (pool.length < POOL_LOW_WATER) {
-      await topUp(difficulty);
-      pool = pools.get(difficulty) ?? [];
+      await topUp(difficulty, filter, key);
+      pool = pools.get(key) ?? [];
     }
     const track = pool.shift();
     if (!track) continue;
-    recent(difficulty).add(track.id);
+    recent(key).add(track.id);
     if (track.previewUrl) return { track, previewUrl: track.previewUrl };
+  }
+  if (!isUnfiltered(filter)) {
+    throw new Error(
+      `No ${difficulty} songs match your filters (${describeFilter(filter)}). ` +
+        `Widen the genres or decades in Settings.`
+    );
   }
   throw new Error(
     `Could not find a playable ${difficulty} track. Apple Music may be rate limiting, try again.`
@@ -399,16 +478,18 @@ export async function drawTrack(difficulty: Difficulty): Promise<DrawnTrack> {
 /** For scripts/sample-pools.ts: peek at tier candidates. */
 export async function sampleCandidates(
   difficulty: Difficulty,
-  count: number
+  count: number,
+  filter: CatalogFilter = NO_FILTER
 ): Promise<AppleSong[]> {
-  for (let i = 0; i < 6 && (pools.get(difficulty)?.length ?? 0) < count; i++) {
-    const before = pools.get(difficulty)?.length ?? 0;
+  const key = poolKey(difficulty, filter);
+  for (let i = 0; i < 6 && (pools.get(key)?.length ?? 0) < count; i++) {
+    const before = pools.get(key)?.length ?? 0;
     try {
-      addToPool(difficulty, shuffle(await generators[difficulty]()));
+      addToPool(key, shuffle(await generators[difficulty](filter)));
     } catch (err) {
       if (i === 0) throw err;
     }
-    if ((pools.get(difficulty)?.length ?? 0) === before && i >= 2) break;
+    if ((pools.get(key)?.length ?? 0) === before && i >= 2) break;
   }
-  return (pools.get(difficulty) ?? []).slice(0, count);
+  return (pools.get(key) ?? []).slice(0, count);
 }
