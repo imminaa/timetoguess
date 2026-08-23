@@ -11,7 +11,13 @@ import StageBar from "@/components/StageBar";
 import TierLadder from "@/components/TierLadder";
 import { STAGES, difficultyMeta, type Difficulty } from "@/lib/game-config";
 import { hintLabel, type HintType } from "@/lib/hints";
-import { applyResult, jumpTo, spendWin, type Progress } from "@/lib/progression";
+import {
+  applyResult,
+  initialProgress,
+  jumpTo,
+  spendWin,
+  type Progress,
+} from "@/lib/progression";
 import {
   defaultSettings,
   loadProgress,
@@ -305,6 +311,11 @@ export default function Game({ ready }: { ready: boolean }) {
     ? (playing.round.hintTypes[revealedHints.length] ?? null)
     : null;
   const tier = progress?.tier ?? "easy";
+  // `progress` is null until localStorage is readable, i.e. during SSR and
+  // hydration. Gating the home screen on it shipped an empty <main> to
+  // crawlers; falling back to the new-player state renders the real markup
+  // server-side, then corrects to the stored tier once the client takes over.
+  const homeProgress = progress ?? initialProgress();
 
   return (
     <div className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pb-12 pt-6 sm:px-6">
@@ -363,7 +374,7 @@ export default function Game({ ready }: { ready: boolean }) {
           </div>
         )}
 
-        {phase.kind === "home" && progress && (
+        {phase.kind === "home" && (
           <section className="animate-fade-up">
             <h1 className="font-display text-4xl font-bold tracking-tight sm:text-5xl">
               Name that tune.
@@ -373,7 +384,7 @@ export default function Game({ ready }: { ready: boolean }) {
               losses slide you back. Jump ahead if you dare.
             </p>
             <div className="mt-8">
-              <TierLadder progress={progress} onJump={jumpTier} />
+              <TierLadder progress={homeProgress} onJump={jumpTier} />
             </div>
             <button
               type="button"

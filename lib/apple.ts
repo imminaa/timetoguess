@@ -12,6 +12,12 @@ const STOREFRONT = process.env.APPLE_STOREFRONT || "us";
 export interface AppleSong {
   id: string;
   title: string;
+  /**
+   * The catalog's own `artistName`, unsplit. Third parties that match on
+   * display text need this: Last.fm files September under "Earth, Wind & Fire"
+   * and returns a different, near-unknown song for "Earth".
+   */
+  primaryArtist: string;
   artists: string[];
   artistId: string | null;
   album: string;
@@ -86,6 +92,7 @@ function mapSong(raw: RawSong): AppleSong | null {
   return {
     id: raw.id,
     title: a.name,
+    primaryArtist: a.artistName,
     // artistName can be "A & B" / "A, B" for collabs — split for matching.
     artists: a.artistName.split(/\s*(?:,|&|\bfeat\.?\b|\bx\b)\s*/i).filter(Boolean),
     artistId: raw.relationships?.artists?.data?.[0]?.id ?? null,
@@ -171,9 +178,13 @@ export async function chartSongs(
     .filter((s): s is AppleSong => s !== null);
 }
 
+/**
+ * Apple's all-time play ranking for one artist — the only popularity ordering
+ * the catalog exposes anywhere. Returned in rank order, best-known first.
+ */
 export async function artistTopSongs(artistId: string): Promise<AppleSong[]> {
   const data = await appleFetch<{ data?: RawSong[] }>(
-    `/artists/${artistId}/view/top-songs?limit=20`
+    `/artists/${artistId}/view/top-songs?limit=25`
   );
   return (data.data ?? []).map(mapSong).filter((s): s is AppleSong => s !== null);
 }
@@ -183,13 +194,43 @@ interface RawAlbum {
   attributes?: { isSingle?: boolean; isCompilation?: boolean; name?: string };
 }
 
-export async function artistAlbumIds(artistId: string): Promise<string[]> {
+export interface AlbumRef {
+  id: string;
+  name: string;
+}
+
+/**
+ * The artist's albums, minus singles and compilations.
+ *
+ * Names come back too because the flags are not enough on their own: Apple
+ * marks live records, soundtracks and reissues as ordinary albums, and a deep
+ * cut from a 1981 live album is a worse round than one from a studio record.
+ */
+export async function artistAlbums(artistId: string): Promise<AlbumRef[]> {
   const data = await appleFetch<{ data?: RawAlbum[] }>(
     `/artists/${artistId}/albums?limit=25`
   );
   return (data.data ?? [])
     .filter((a) => !a.attributes?.isSingle && !a.attributes?.isCompilation)
-    .map((a) => a.id);
+    .map((a) => ({ id: a.id, name: a.attributes?.name ?? "" }));
+}
+
+interface RawGenre {
+  id: string;
+  attributes?: { name?: string };
+}
+
+/**
+ * Apple's top-level genres. The genre charts are the cheapest way to widen the
+ * canon past the pop/rock centre of the Essentials playlists — a chart-derived
+ * source is recency-skewed, so what it contributes is breadth, not authority;
+ * the popularity floors decide what survives.
+ */
+export async function topLevelGenres(): Promise<{ id: number; name: string }[]> {
+  const data = await appleFetch<{ data?: RawGenre[] }>(`/genres`);
+  return (data.data ?? [])
+    .map((g) => ({ id: Number(g.id), name: g.attributes?.name ?? "" }))
+    .filter((g) => Number.isFinite(g.id) && g.name && g.name !== "Music");
 }
 
 export async function albumSongs(albumId: string): Promise<AppleSong[]> {
